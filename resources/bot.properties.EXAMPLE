@@ -1,0 +1,12 @@
+# channel properties and details
+username=
+channel=
+client_id=
+client_secrets=
+
+# db properties
+db.host=
+db.db_name=
+db.user=
+db.password=
+db.port=
