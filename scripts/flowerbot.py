@@ -18,12 +18,14 @@ USERS_CHECKED = set()
 # required properties
 APPROVED_STREAMERS_FILE = 'resources/data/approved_streamers.txt'
 
-BOT_USERNAME = 'username'
-CHANNEL = 'channel'
+BOT_USERNAME = 'bot.username'
+CHANNEL = 'channel.name'
 CLIENT_ID = 'client_id'
 CLIENT_SECRETS = 'client_secrets'
 IRC_CHAT_SERVER_PORT = 'server.port'
 IRC_CHAT_SERVER = 'server.url'
+CHANNEL_CROSSTALK_LIST = 'channel.cross_talk_list'
+CHANNEL_MOD_PERMISSIONS_LIST = 'channel.mod_permissions_list'
 
 # db properties
 DB_HOST = 'db.host'
@@ -31,9 +33,6 @@ DB_NAME = 'db.db_name'
 DB_USER = 'db.user'
 DB_PW = 'db.password'
 DB_PORT = 'db.port'
-
-DEAFULT_IRC_CHAT_SERVER = 'irc.chat.twitch.tv'
-DEFAULT_CHAT_SERVER_PORT = 6667
 
 # ---------------------------------------------------------------------------------------------
 # db functions
@@ -49,52 +48,59 @@ def establish_db_connection(properties):
         sys.exit(2)
     return connection
 
+def parse_properties(properties_filename):
+    ''' Parses the properties file. '''
+    properties = {}
+    with open(properties_filename, 'rU') as properties_file:
+        for line in properties_file:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            property = map(str.strip, line.split('='))
+            if len(property) != 2:
+                continue
+            properties[property[0]] = property[1]
+
+    # error check required properties
+    if (CHANNEL not in properties or len(properties[CHANNEL]) == 0 or
+        CLIENT_ID not in properties or len(properties[CLIENT_ID]) == 0 or
+        CLIENT_SECRETS not in properties or len(properties[CLIENT_SECRETS]) == 0 or
+        BOT_USERNAME not in properties or len(properties[BOT_USERNAME]) == 0 or
+        IRC_CHAT_SERVER not in properties or len(properties[IRC_CHAT_SERVER]) == 0 or
+        IRC_CHAT_SERVER_PORT not in properties or len(properties[IRC_CHAT_SERVER_PORT]) == 0):
+        print >> ERROR_FILE, 'Missing one or more required properties, please check property file'
+        sys.exit(2)
+    # add broadcaster to list of users with mod permsissions
+    mod_permissions_list = set(map(str.strip, properties.get(CHANNEL_MOD_PERMISSIONS_LIST, '')))
+    mod_permissions_list.add(properties[CHANNEL])
+    properties[CHANNEL_MOD_PERMISSIONS_LIST] = list(mod_permissions_list)
+    return properties
+
 class TwitchBot(irc.bot.SingleServerIRCBot):
-    def __init__(self, properties_filename):
-        properties = self.parse_properties(properties_filename)
+    def __init__(self, properties):
         self.channel_display_name = properties[CHANNEL]
         self.channel = '#' + properties[CHANNEL]
-        # self.bot_username = properties[BOT_USERNAME]
+        self.bot_username = properties[BOT_USERNAME]
         self.client_id = properties[CLIENT_ID]
         self.token = properties[CLIENT_SECRETS]
         self.approved_streamers_file = properties.get(APPROVED_STREAMERS_FILE,'')
         self.death_count = 0
         self.channel_id = self.get_channel_id(properties[CHANNEL])
-        self.db_connection = establish_db_connection(properties)
-
-        server = properties.get(IRC_CHAT_SERVER, DEAFULT_IRC_CHAT_SERVER)
-        port = properties.get(IRC_CHAT_SERVER_PORT, DEFAULT_CHAT_SERVER_PORT)
-
-        # Create IRC bot connection
-        print >> OUTPUT_FILE, 'Connecting to %s on port %s...' % (server, port) 
-        irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], properties[BOT_USERNAME], properties[BOT_USERNAME])
-
-    def parse_properties(self, properties_filename):
-        ''' Parses the properties file. '''
-        properties = {}
-        with open(properties_filename, 'rU') as properties_file:
-            for line in properties_file:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                property = map(str.strip, line.split('='))
-                if len(property) != 2:
-                    continue
-                properties[property[0]] = property[1]
-
-        # error check required properties
-        if (CHANNEL not in properties or len(properties[CHANNEL]) == 0 or
-            CLIENT_ID not in properties or len(properties[CLIENT_ID]) == 0 or
-            CLIENT_SECRETS not in properties or len(properties[CLIENT_SECRETS]) == 0 or
-            BOT_USERNAME not in properties or len(properties[BOT_USERNAME]) == 0):
-            print >> ERROR_FILE, 'Missing one or more required properties, please check property file'
-            sys.exit(2)
+        self.cross_talk_channel_list = properties.get(CHANNEL_CROSSTALK_LIST, [])
+        self.mod_permissions_list = properties[CHANNEL_MOD_PERMISSIONS_LIST]
+        # self.db_connection = establish_db_connection(properties)
 
         # init approved streamers list for auto-shoutouts (optional)
-        if os.path.exists(APPROVED_STREAMERS_FILE):
-            self.init_approved_streamers(APPROVED_STREAMERS_FILE)
-        return properties
-    
+        if self.approved_streamers_file != '' and os.path.exists(self.approved_streamers_file):
+            self.init_approved_streamers(self.approved_streamers_file)
+
+        server = properties[IRC_CHAT_SERVER]
+        port = properties[IRC_CHAT_SERVER_PORT]
+
+        # Create IRC bot connection
+        print >> OUTPUT_FILE, 'Connecting to %s on port %s...' % (server, port)
+        irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
+
     def init_approved_streamers(self, approved_streamers_filename):
         with open (approved_streamers_filename, 'rU') as approved_streamers_file:
             for username in approved_streamers_file.readlines():
@@ -111,7 +117,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
         # give a streamer shoutout if viewer is in the approved streamers set
-        # and streamer has not already gotten a shout out 
+        # and streamer has not already gotten a shout out
         # (i.e., manual shotout with !so <username> command)
         if not e.arguments[0].startswith('!'):
             self.auto_streamer_shoutout(e)
@@ -156,23 +162,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def current_death_count(self, c):
         ''' Returns current death count. '''
-        message = "cornflower's current death count is %s ;___;" % (self.death_count)
+        message = "@%s's current death count is %s ;___;" % (self.channel_display_name, self.death_count)
         c.privmsg(self.channel, message)
-        return
-
-    def get_current_channel_viewers(twitch_channel):
-        '''
-            Returns map of current channel viewers organized by type.
-        '''
-        url = 'http://tmi.twitch.tv/group/user/' + twitch_channel + '/chatters'
-        r = requests.get(url).json()
-        channel_viewers = {
-            'viewers': map(str, r['chatters']['viewers']),
-            'moderators': map(str, r['chatters']['moderators']),
-            'broadcaster': str(r['chatters']['broadcaster']),
-            'vips': map(str, r['chatters']['vips'])
-        }
-        return channel_viewers
+        if self.cross_talk_channel_list != []:
+            for cross_talk_channel_name in self.cross_talk_channel_list:
+                c.privmsg('#' + cross_talk_channel_name, message + '  -  (shared message from channel: %s)' % (self.channel_display_name))
 
     # ---------------------------------------------------------------------------------------------
     # STREAMER SHOUTOUT FUNCTIONS
@@ -183,6 +177,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         game = self.get_last_game_played(cid)
         message = '@%s is also a streamer! For some %s action, check them out some time at https://www.twitch.tv/%s' % (user, game, user)
         c.privmsg(self.channel, message)
+        if self.cross_talk_channel_list != []:
+            for cross_talk_channel_name in self.cross_talk_channel_list:
+                c.privmsg('#' + cross_talk_channel_name, message + '  -  (shared message from channel: %s)' % (self.channel_display_name))
         USERS_CHECKED.add(user)
 
     def auto_streamer_shoutout(self, e):
@@ -207,9 +204,10 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     # BOT MAIN
     def do_command(self, e, cmd, cmd_args):
         c = self.connection
-        current_viewers = self.get_current_channel_viewers(self.channel_display_name)
         cmd_issuer = self.get_username(e)
-        has_mod_permissions = (cmd_issuer in current_viewers['moderators'] or cmd_issuer == current_viewers['broadcaster'])
+        has_mod_permissions = False
+        if cmd_issuer in self.mod_permissions_list:
+            has_mod_permissions = True
 
         if cmd == "game":
             game = self.get_last_game_played(self.channel_id)
@@ -222,7 +220,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.streamer_shoutout_message(cmd_args[0])
         elif cmd == 'death':
             self.current_death_count(c)
-        elif cmd_issuer == current_viewers['broadcaster']:
+        elif cmd_issuer == self.channel_display_name:
             if cmd == "streameraddnew":
                 self.update_approved_streamers_list(cmd_args[0])
         elif has_mod_permissions:
@@ -244,13 +242,19 @@ def main():
     # parse command line
     parser = optparse.OptionParser()
     parser.add_option('-p', '--properties-file', action = 'store', dest = 'propsfile', help = 'path to properties file')
+    parser.add_option('-x', '--cross-talk-channels', action = 'store', dest = 'channelxtalk', help = 'comma-delimited list of channels to cross-talk with')
     (options, args) = parser.parse_args()
     properties_filename = options.propsfile
+    cross_talk_channel_list = options.channelxtalk
 
     if not properties_filename:
         usage(parser)
-    
-    bot = TwitchBot(properties_filename)
+    properties = parse_properties(properties_filename)
+
+    if cross_talk_channel_list:
+        properties[CHANNEL_CROSSTALK_LIST] = map(str.strip, cross_talk_channel_list.split(','))
+
+    bot = TwitchBot(properties)
     bot.start()
 
 if __name__ == "__main__":
