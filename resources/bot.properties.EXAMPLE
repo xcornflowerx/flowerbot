@@ -1,8 +1,11 @@
 # channel properties and details
-username=
-channel=
+bot.username=
+channel.name=
 client_id=
 client_secrets=
+channel.mod_permissions_list=
+server.url=irc.chat.twitch.tv
+server.port=6667
 
 # db properties
 db.host=
