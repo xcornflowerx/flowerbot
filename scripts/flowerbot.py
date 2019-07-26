@@ -16,7 +16,7 @@ USERS_CHECKED = set()
 
 # ---------------------------------------------------------------------------------------------
 # required properties
-APPROVED_STREAMERS_FILE = 'resources/data/approved_streamers.txt'
+APPROVED_STREAMERS_FILE_PATH = 'resources/data/approved_streamers.txt'
 
 BOT_USERNAME = 'bot.username'
 CHANNEL = 'channel.name'
@@ -26,6 +26,7 @@ IRC_CHAT_SERVER_PORT = 'server.port'
 IRC_CHAT_SERVER = 'server.url'
 CHANNEL_CROSSTALK_LIST = 'channel.cross_talk_list'
 CHANNEL_MOD_PERMISSIONS_LIST = 'channel.mod_permissions_list'
+APPROVED_STREAMERS_FILE = 'approved_streamers_file'
 
 # db properties
 DB_HOST = 'db.host'
@@ -68,10 +69,12 @@ def parse_properties(properties_filename):
         BOT_USERNAME not in properties or len(properties[BOT_USERNAME]) == 0 or
         IRC_CHAT_SERVER not in properties or len(properties[IRC_CHAT_SERVER]) == 0 or
         IRC_CHAT_SERVER_PORT not in properties or len(properties[IRC_CHAT_SERVER_PORT]) == 0):
-        print >> ERROR_FILE, 'Missing one or more required properties, please check property file'
+        missing = [p for p in [CHANNEL, CLIENT_ID, CLIENT_SECRETS, BOT_USERNAME, IRC_CHAT_SERVER, IRC_CHAT_SERVER_PORT] if p not in properties.keys()]
+        print >> ERROR_FILE, 'Missing one or more required properties, please check property file for the following: %s' % (', '.join(missing))
         sys.exit(2)
+
     # add broadcaster to list of users with mod permsissions
-    mod_permissions_list = set(map(str.strip, properties.get(CHANNEL_MOD_PERMISSIONS_LIST, '')))
+    mod_permissions_list = set(map(str.strip, properties.get(CHANNEL_MOD_PERMISSIONS_LIST, '').split(',')))
     mod_permissions_list.add(properties[CHANNEL])
     properties[CHANNEL_MOD_PERMISSIONS_LIST] = list(mod_permissions_list)
     return properties
@@ -95,10 +98,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.init_approved_streamers(self.approved_streamers_file)
 
         server = properties[IRC_CHAT_SERVER]
-        port = properties[IRC_CHAT_SERVER_PORT]
+        port = int(properties[IRC_CHAT_SERVER_PORT])
 
         # Create IRC bot connection
         print >> OUTPUT_FILE, 'Connecting to %s on port %s...' % (server, port)
+        print >> OUTPUT_FILE, self.mod_permissions_list
         irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
 
     def init_approved_streamers(self, approved_streamers_filename):
@@ -123,7 +127,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.auto_streamer_shoutout(e)
         else:
             # If a chat message starts with an exclamation point, try to run it as a command
-            parsed_args = map(lambda x: str(x).lower(), e.arguments[0].split(' '))
+            try:
+                parsed_args = map(lambda x: str(x).lower(), e.arguments[0].split(' '))
+            except UnicodeEncodeError:
+                print >> ERROR_FILE, "Cannot parse command or message."
+                return
             cmd = parsed_args[0].replace('!','')
             cmd_args = []
             if len(parsed_args) > 1:

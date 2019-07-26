@@ -1,2 +1,4 @@
 resources/data/approved_streamers.txt
 resources/*.properties
+.DS_Store
+*.pyc
