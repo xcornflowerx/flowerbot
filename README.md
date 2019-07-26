@@ -32,3 +32,15 @@ db.port=
 ```
 python flowerbot.py --properties-file /path/to/properties/file --cross-talk-channels [optional, comma-delimited list of channels to share messages to]
 ```
+
+### Compile:
+Compile flowerbot to launch from script or streamdeck with a python launcher.
+
+First add `FLOWERBOT_HOME=/path/to/flowerbot` to your automation environemnt (i.e., ~/.bashrc).
+
+Then compile `launchbot.py`:
+```
+python -m py_compile scripts/launchbot.py
+```
+
+Confirm that when the `launchbot` application is run that the correct version of Python launcher is running the app (i.e., not Python 3 launcher). The default launcher can be set for `*.pyc` file types by right clicking the compiled file and selecting "Get Info". From the pop up menu, change the default application for opening this type of file. (Note: These instructions are for configuring the default launcher if using a Mac.)
