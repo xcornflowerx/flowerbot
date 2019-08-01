@@ -27,6 +27,7 @@ IRC_CHAT_SERVER = 'server.url'
 CHANNEL_CROSSTALK_LIST = 'channel.cross_talk_list'
 CHANNEL_MOD_PERMISSIONS_LIST = 'channel.mod_permissions_list'
 APPROVED_STREAMERS_FILE = 'approved_streamers_file'
+CUSTOM_HYPE_MESSAGE = 'hype.message'
 
 # db properties
 DB_HOST = 'db.host'
@@ -91,6 +92,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.channel_id = self.get_channel_id(properties[CHANNEL])
         self.cross_talk_channel_list = properties.get(CHANNEL_CROSSTALK_LIST, [])
         self.mod_permissions_list = properties[CHANNEL_MOD_PERMISSIONS_LIST]
+        self.custom_hype_message = properties.get(CUSTOM_HYPE_MESSAGE, '')
         # self.db_connection = establish_db_connection(properties)
 
         # init approved streamers list for auto-shoutouts (optional)
@@ -224,6 +226,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         elif cmd == "title":
             title = self.get_channel_title(self.channel_id)
             c.privmsg(self.channel, self.channel_display_name + ' channel title is currently ' + title)
+        elif cmd == 'hype' and self.custom_hype_message:
+            c.privmsg(self.channel, self.custom_hype_message)
         elif cmd == "so":
             self.streamer_shoutout_message(cmd_args[0])
         elif cmd == 'death':
