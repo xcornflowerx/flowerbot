@@ -15,10 +15,10 @@ bot.username= # username for bot (either your own twitch account or a separate *
 channel.name= # your twitch channel name
 client_id= # your twitch client id
 client_secrets= # your twitch client secrets
-channel.mod_permissions_list= # comma-delimited list of users with mod permissions
 server.url=irc.chat.twitch.tv # default server domain
 server.port=6667 # default server port to connect irc client to
 ```
+
 Database properties if custom loyalty point system is desired:
 ```
 db.host=
@@ -27,6 +27,18 @@ db.user=
 db.password=
 db.port=
 ```
+
+Additional (optional) properties:
+```
+channel.trused_users_list= # comma-delimited list of trusted users permitted to use mod-level commands
+approved_streamers_file= # path to filename containing line-delimited list of approved streamers to auto shoutout
+hype.message= # custom hype message for !hype command
+ignored_users_list= # comma-delimited list of users to ignore when giving an auto shoutout or any streamer shout out (i.e., nightbot or streamelements)
+queue_names_list= # comma-delimited list of queues that users can join
+```
+
+Flowerbot customization and additional documentation:
+- [Custom Queues](./docs/Queues.md)
 
 ### Usage:
 ```
