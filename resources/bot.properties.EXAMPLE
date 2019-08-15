@@ -19,3 +19,6 @@ server.port=6667
 # custom properties
 approved_streamers_file=
 hype.message=
+ignored_users_list=nightbot,streamelements
+rationed_users_list=
+queue_names_list=
