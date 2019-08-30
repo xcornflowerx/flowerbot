@@ -48,8 +48,12 @@ DB_PORT = 'db.port'
 MSG_USERNAME_REPLACE_STRING = '${username}'
 MSG_LAST_GAME_PLAYED_REPLACE_STRING = '${lastgameplayed}'
 MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
-
 DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For some ${lastgameplayed} action, check them out some time at https://www.twitch.tv/${username}'
+
+# POKEMANS
+USER_BALL_TOTALS = {'xcornflowerx' : 1}
+USER_POKEDEX = {'xcornflowerx', 20}
+POKEDEX_TOTAL = 151
 
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'hype', 'so', 'death', 'print',
@@ -386,6 +390,47 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         return
 
     # ---------------------------------------------------------------------------------------------
+    # POKEMANS
+    def add_ball(self, cmd_issuer, user):
+        c = self.connection
+        if not cmd_issuer in ['streamelements', self.channel_display_name] :
+            c.privmsg(self.channel, 'You do not have permission to use that command :)')
+            return
+        USER_BALL_TOTALS[user] = USER_BALL_TOTALS.get(user, 0) + 1
+        c.privmsg(self.channel, '@%s you now have %s pokeballs in your bag! Use !throw to catch a pokemon!' % (user, USER_BALL_TOTALS[user]))
+        return
+
+    def throw_ball(self, cmd_issuer):
+        c = self.connection
+        if USER_BALL_TOTALS.get(cmd_issuer, 0) > 0:
+            USER_BALL_TOTALS[cmd_issuer] USER_BALL_TOTALS[cmd_issuer] - 1
+            message = '@%s - you just caught %s!' % (cmd_issuer, 'random pokemon')
+        else:
+            message = '@%s - you do not have any balls to catch mons with :( use !buyball to purchase a pokeball with your loyalty points' % (cmd_issuer)
+        c.privmsg(self.channel, message)
+        return
+
+    def check_bag(self, cmd_issuer):
+        c = self.connection
+        balls = USER_BALL_TOTALS.get(cmd_issuer, 0)
+        if balls > 0:
+            message = '@%s - you have %s pokeballs in your bag!' % (cmd_issuer, balls)
+        else:
+            message = '@%s - you do not have any balls to catch mons with :( use !buyball to purchase a pokeball with your loyalty points' % (cmd_issuer)
+        c.privmsg(self.channel, message)
+        return
+
+    def check_pokedex(self, cmd_issuer):
+        c = self.connection
+        caught_mons = USER_POKEDEX.get(cmd_issuer, 0)
+        if caught_mons > 0:
+            message = '@%s your pokedex is %f.2% complete!' % (cmd_issuer, (caught_mons/POKEDEX_TOTAL))
+        else:
+            message = '@%s you have not caught any pokemon yet :(' % (cmd_issuer)
+        c.privmsg(self.channel, message)
+        return
+
+    # ---------------------------------------------------------------------------------------------
     # BOT MAIN
     def do_command(self, e, cmd_issuer, cmd, cmd_args):
         c = self.connection
@@ -416,6 +461,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             elif 'win' in cmd_args and cmd_issuer == self.channel_display_name:
                 QUEUE_SCORE[cmd] = QUEUE_SCORE.get(cmd, 0) + 1
                 self.print_current_score()
+        elif cmd == 'addball':
+            self.add_ball(cmd_issuer, cmd_args[0])
+        elif cmd == 'throw':
+            self.throw_ball(cmd_issuer)
+        elif cmd == 'bag':
+            self.check_bag(cmd_issuer)
+        elif cmd == 'pokedex':
+            self.check_pokedex(cmd_issuer)
         elif cmd == 'queueinit' and cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
             self.init_new_queue_list(cmd_args)
         elif cmd == 'score':
