@@ -31,10 +31,13 @@ db.port=
 Additional (optional) properties:
 ```
 channel.trused_users_list= # comma-delimited list of trusted users permitted to use mod-level commands
-approved_streamers_file= # path to filename containing line-delimited list of approved streamers to auto shoutout
+auto_shoutout_users_file= # path to filename containing line-delimited list of approved twitch users to give an auto shoutout to
+custom_shoutouts_file= # path to tab-delimited file containing custom user shoutout messages for certain users
 hype.message= # custom hype message for !hype command
 ignored_users_list= # comma-delimited list of users to ignore when giving an auto shoutout or any streamer shout out (i.e., nightbot or streamelements)
+restricted_users_list = # comma-delimited list of users with restricted access to command usage
 queue_names_list= # comma-delimited list of queues that users can join
+custom.user_shoutout_message = # auto shoutout user message template. Add ${username} to auto-insert username and ${lastgameplayed} to auto-insert user's last game played
 ```
 
 Flowerbot customization and additional documentation:
@@ -42,7 +45,7 @@ Flowerbot customization and additional documentation:
 
 ### Usage:
 ```
-python flowerbot.py --properties-file /path/to/properties/file --cross-talk-channels [optional, comma-delimited list of channels to share messages to]
+python flowerbot.py --properties-file /path/to/properties/file
 ```
 
 ### Compile:
