@@ -17,8 +17,9 @@ server.url=irc.chat.twitch.tv
 server.port=6667
 
 # custom properties
-approved_streamers_file=
+auto_shoutout_users_file=
+custom_shoutouts_file=
 hype.message=
 ignored_users_list=nightbot,streamelements
-rationed_users_list=
+restricted_users_list=
 queue_names_list=

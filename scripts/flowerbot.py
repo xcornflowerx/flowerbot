@@ -5,13 +5,15 @@ import requests
 import os
 import optparse
 import MySQLdb
+import csv
 
 # ---------------------------------------------------------------------------------------------
 # globals
 OUTPUT_FILE = sys.stdout
 ERROR_FILE = sys.stderr
 
-APPROVED_STREAMERS = {}
+APPROVED_AUTO_SHOUTOUT_USERS = {}
+CUSTOM_USER_SHOUTOUTS = {}
 USERS_CHECKED = set()
 
 # QUEUE
@@ -20,8 +22,6 @@ QUEUE_SCORE = {}
 
 # ---------------------------------------------------------------------------------------------
 # required properties
-APPROVED_STREAMERS_FILE_PATH = 'resources/data/approved_streamers.txt'
-
 BOT_USERNAME = 'bot.username'
 CHANNEL = 'channel.name'
 CLIENT_ID = 'client_id'
@@ -29,11 +29,13 @@ CLIENT_SECRETS = 'client_secrets'
 IRC_CHAT_SERVER_PORT = 'server.port'
 IRC_CHAT_SERVER = 'server.url'
 CHANNEL_TRUSTED_USERS_LIST = 'channel.trusted_users_list'
-APPROVED_STREAMERS_FILE = 'approved_streamers_file'
+AUTO_SHOUTOUT_USERS_FILE = 'auto_shoutout_users_file'
+CUSTOM_SHOUTOUTS_FILE = 'custom_shoutouts_file'
+CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE = 'custom.user_shoutout_message'
 CUSTOM_HYPE_MESSAGE = 'hype.message'
 IGNORED_USERS_LIST = 'ignored_users_list'
-RATIONED_USERS_LIST = 'rationed_users_list'
-RATIONED_USERS_COMMAND_COUNT = {}
+RESTRICTED_USERS_LIST = 'restricted_users_list'
+RESTRICTED_USERS_COMMAND_COUNT = {}
 QUEUE_NAMES_LIST = 'queue_names_list'
 
 # db properties
@@ -42,6 +44,12 @@ DB_NAME = 'db.db_name'
 DB_USER = 'db.user'
 DB_PW = 'db.password'
 DB_PORT = 'db.port'
+
+MSG_USERNAME_REPLACE_STRING = '${username}'
+MSG_LAST_GAME_PLAYED_REPLACE_STRING = '${lastgameplayed}'
+MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
+
+DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For some ${lastgameplayed} action, check them out some time at https://www.twitch.tv/${username}'
 
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'hype', 'so', 'death', 'print',
@@ -74,7 +82,7 @@ def parse_properties(properties_filename):
             if len(property) != 2:
                 continue
             value = property[1]
-            if property[0] in [IGNORED_USERS_LIST, RATIONED_USERS_LIST, QUEUE_NAMES_LIST]:
+            if property[0] in [IGNORED_USERS_LIST, RESTRICTED_USERS_LIST, QUEUE_NAMES_LIST]:
                 value = map(str.strip, value.split(','))
             properties[property[0]] = value
 
@@ -102,19 +110,27 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.bot_username = properties[BOT_USERNAME]
         self.client_id = properties[CLIENT_ID]
         self.token = properties[CLIENT_SECRETS]
-        self.approved_streamers_file = properties.get(APPROVED_STREAMERS_FILE,'')
+        self.auto_shoutout_users_file = properties.get(AUTO_SHOUTOUT_USERS_FILE, '')
+        self.custom_shoutouts_file = properties.get(CUSTOM_SHOUTOUTS_FILE, '')
         self.death_count = 0
         self.channel_id = self.get_channel_id(properties[CHANNEL])
         self.trusted_users_list = properties[CHANNEL_TRUSTED_USERS_LIST]
         self.custom_hype_message = properties.get(CUSTOM_HYPE_MESSAGE, '')
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
-        self.rationed_users_list = properties.get(RATIONED_USERS_LIST, [])
+        self.restricted_users_list = properties.get(RESTRICTED_USERS_LIST, [])
         self.queue_names_list = properties.get(QUEUE_NAMES_LIST, [])
+
+        self.user_shoutout_message_template = DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE
+        if CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE in properties and properties[CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE]:
+            self.user_shoutout_message_template = properties[CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE]
         # self.db_connection = establish_db_connection(properties)
 
-        # init approved streamers list for auto-shoutouts (optional)
-        if self.approved_streamers_file != '' and os.path.exists(self.approved_streamers_file):
-            self.init_approved_streamers(self.approved_streamers_file)
+        # init auto shoutout list for auto-shoutouts (optional)
+        if self.auto_shoutout_users_file != '' and os.path.exists(self.auto_shoutout_users_file):
+            self.init_auto_shoutout_users(self.auto_shoutout_users_file)
+
+        if self.custom_shoutouts_file != '' and os.path.exists(self.custom_shoutouts_file):
+            self.init_custom_shoutout_users(self.custom_shoutouts_file)
 
         server = properties[IRC_CHAT_SERVER]
         port = int(properties[IRC_CHAT_SERVER_PORT])
@@ -123,10 +139,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         print >> OUTPUT_FILE, 'Connecting to %s on port %s...' % (server, port)
         irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
 
-    def init_approved_streamers(self, approved_streamers_filename):
-        with open (approved_streamers_filename, 'rU') as approved_streamers_file:
-            for username in approved_streamers_file.readlines():
-                APPROVED_STREAMERS[username.strip()] = False
+    def init_auto_shoutout_users(self, auto_shoutout_users_filename):
+        with open (auto_shoutout_users_filename, 'rU') as auto_shoutout_users_file:
+            for username in auto_shoutout_users_file.readlines():
+                APPROVED_AUTO_SHOUTOUT_USERS[username.strip()] = False
+
+    def init_custom_shoutout_users(self, custom_shoutouts_filename):
+        with open(custom_shoutouts_filename, 'rU') as custom_shoutouts_file:
+            for record in csv.DictReader(custom_shoutouts_file, dialect='excel-tab'):
+                if not 'TWITCH_USERNAME' in record.keys() or not 'SHOUTOUT_MESSAGE' in record.keys():
+                    print >> ERROR_FILE, 'Custom shoutout file does not contain one or more of required headers:: "TWITCH_USERNAME", "SHOUTOUT_MESSAGE"'
+                    sys.exit(2)
+                CUSTOM_USER_SHOUTOUTS[record['TWITCH_USERNAME']] = record['SHOUTOUT_MESSAGE']
 
     def on_welcome(self, c, e):
         ''' Handle welcome. '''
@@ -142,9 +166,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         # and streamer has not already gotten a shout out
         # (i.e., manual shoutout with !so <username> command)
         cmd_issuer = self.get_username(e)
-        if cmd_issuer in self.rationed_users_list and e.arguments[0].startswith('!'):
-            RATIONED_USERS_COMMAND_COUNT[cmd_issuer] = RATIONED_USERS_COMMAND_COUNT.get(cmd_issuer, 0) + 1
-            if RATIONED_USERS_COMMAND_COUNT[cmd_issuer] > 5:
+        if cmd_issuer in self.restricted_users_list and e.arguments[0].startswith('!'):
+            RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] = RESTRICTED_USERS_COMMAND_COUNT.get(cmd_issuer, 0) + 1
+            if RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] > 5:
                 c.privmsg(self.channel, '%s your use of commands has been suspended temporarily for overusage Kappa' % (cmd_issuer))
                 return
 
@@ -186,10 +210,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def get_last_game_played(self, twitch_channel_id):
         ''' Returns last game played for given channel id. '''
-        url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
-        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        r = requests.get(url, headers=headers).json()
-        return r['game']
+        try:
+            url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
+            headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+            r = requests.get(url, headers=headers).json()
+            return r['game']
+        except:
+            print >> ERROR_FILE, 'Error encountered while attempting to resolve last game played for channel id %s' % (channel_id)
+            return None
 
     def get_channel_title(self, e):
         ''' Returns channel title. '''
@@ -221,29 +249,36 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         cid = self.get_channel_id(user)
         game = self.get_last_game_played(cid)
         if str(game) == 'None':
-            c.privmsg(self.channel, '%s does not stream BibleThump' % (user))
-            return
-        message = '@%s is also a streamer! For some %s action, check them out some time at https://www.twitch.tv/%s' % (user, game, user)
+            if user in APPROVED_AUTO_SHOUTOUT_USERS.keys():
+                message = '%s streams but they are keeping their last game a played a secret Kappa' % (user)
+            else:
+                message = '%s is not a streamer BibleThump'
+        else:
+            message = CUSTOM_USER_SHOUTOUTS.get(user, self.user_shoutout_message_template)
+            message = message.replace(MSG_USERNAME_REPLACE_STRING, user)
+            message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
+            USERS_CHECKED.add(user)
         c.privmsg(self.channel, message)
-        USERS_CHECKED.add(user)
+        return
 
     def auto_streamer_shoutout(self, e):
         ''' Gives an automated streamer shoutout. '''
         user = self.get_username(e)
         if user in USERS_CHECKED:
             return
-        if user in APPROVED_STREAMERS and not APPROVED_STREAMERS[user]:
-            APPROVED_STREAMERS[user] = True
+        if user in APPROVED_AUTO_SHOUTOUT_USERS and not APPROVED_AUTO_SHOUTOUT_USERS[user]:
+            APPROVED_AUTO_SHOUTOUT_USERS[user] = True
             self.streamer_shoutout_message(user)
         USERS_CHECKED.add(user)
         return
 
-    def update_approved_streamers_list(self, streamer):
-        ''' Updates approved streamers list. This is only permitted for channel broadcaster. '''
-        if not streamer in APPROVED_STREAMERS.keys():
-            APPROVED_STREAMERS[streamer] = True
-            with open(self.approved_streamers_file, 'w') as streamer_file:
-                streamer_file.write('\n'.join(APPROVED_STREAMERS.keys()))
+    def update_approved_auto_shoutout_users_list(self, streamer):
+        ''' Updates auto shoutout users file. This is only permitted for channel broadcaster. '''
+        if not streamer in APPROVED_AUTO_SHOUTOUT_USERS.keys():
+            APPROVED_AUTO_SHOUTOUT_USERS[streamer] = True
+            if len(APPROVED_AUTO_SHOUTOUT_USERS.keys()) > 0:
+                with open(self.auto_shoutout_users_file, 'w') as streamer_file:
+                    streamer_file.write('\n'.join(APPROVED_AUTO_SHOUTOUT_USERS.keys()))
 
     # ---------------------------------------------------------------------------------------------
     # CUSTOM USER QUEUE FUNCTIONS
@@ -388,7 +423,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.streamer_shoutout_message(cmd_args[0])
         elif cmd_issuer == self.channel_display_name:
             if cmd == "streameraddnew":
-                self.update_approved_streamers_list(cmd_args[0])
+                self.update_approved_auto_shoutout_users_list(cmd_args[0])
 
 def usage(parser):
     print >> OUTPUT_FILE, parser.print_help()
