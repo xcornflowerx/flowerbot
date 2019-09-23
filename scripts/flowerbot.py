@@ -28,7 +28,6 @@ CLIENT_ID = 'client_id'
 CLIENT_SECRETS = 'client_secrets'
 IRC_CHAT_SERVER_PORT = 'server.port'
 IRC_CHAT_SERVER = 'server.url'
-CHANNEL_CROSSTALK_LIST = 'channel.cross_talk_list'
 CHANNEL_TRUSTED_USERS_LIST = 'channel.trusted_users_list'
 APPROVED_STREAMERS_FILE = 'approved_streamers_file'
 CUSTOM_HYPE_MESSAGE = 'hype.message'
@@ -106,7 +105,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.approved_streamers_file = properties.get(APPROVED_STREAMERS_FILE,'')
         self.death_count = 0
         self.channel_id = self.get_channel_id(properties[CHANNEL])
-        self.cross_talk_channel_list = properties.get(CHANNEL_CROSSTALK_LIST, [])
         self.trusted_users_list = properties[CHANNEL_TRUSTED_USERS_LIST]
         self.custom_hype_message = properties.get(CUSTOM_HYPE_MESSAGE, '')
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
@@ -204,9 +202,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         ''' Returns current death count. '''
         message = "@%s's current death count is %s ;___;" % (self.channel_display_name, self.death_count)
         c.privmsg(self.channel, message)
-        if self.cross_talk_channel_list != []:
-            for cross_talk_channel_name in self.cross_talk_channel_list:
-                c.privmsg('#' + cross_talk_channel_name, message + '  -  (shared message from channel: %s)' % (self.channel_display_name))
 
     # ---------------------------------------------------------------------------------------------
     # STREAMER SHOUTOUT FUNCTIONS
@@ -230,9 +225,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             return
         message = '@%s is also a streamer! For some %s action, check them out some time at https://www.twitch.tv/%s' % (user, game, user)
         c.privmsg(self.channel, message)
-        if self.cross_talk_channel_list != []:
-            for cross_talk_channel_name in self.cross_talk_channel_list:
-                c.privmsg('#' + cross_talk_channel_name, message + '  -  (shared message from channel: %s)' % (self.channel_display_name))
         USERS_CHECKED.add(user)
 
     def auto_streamer_shoutout(self, e):
@@ -406,17 +398,12 @@ def main():
     # parse command line
     parser = optparse.OptionParser()
     parser.add_option('-p', '--properties-file', action = 'store', dest = 'propsfile', help = 'path to properties file')
-    parser.add_option('-x', '--cross-talk-channels', action = 'store', dest = 'channelxtalk', help = 'comma-delimited list of channels to cross-talk with')
     (options, args) = parser.parse_args()
     properties_filename = options.propsfile
-    cross_talk_channel_list = options.channelxtalk
 
     if not properties_filename:
         usage(parser)
     properties = parse_properties(properties_filename)
-
-    if cross_talk_channel_list:
-        properties[CHANNEL_CROSSTALK_LIST] = map(str.strip, cross_talk_channel_list.split(','))
 
     bot = TwitchBot(properties)
     bot.start()
