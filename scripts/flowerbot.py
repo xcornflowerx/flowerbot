@@ -103,6 +103,9 @@ def parse_properties(properties_filename):
     properties[CHANNEL_TRUSTED_USERS_LIST] = list(trusted_users_list)
     return properties
 
+def encode_ascii_string(value):
+    return value.encode('ascii', 'ignore')
+
 class TwitchBot(irc.bot.SingleServerIRCBot):
     def __init__(self, properties):
         self.channel_display_name = properties[CHANNEL]
@@ -162,29 +165,33 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
-        # give a streamer shoutout if viewer is in the approved streamers set
-        # and streamer has not already gotten a shout out
-        # (i.e., manual shoutout with !so <username> command)
+        user_message = e.arguments[0].encode('ascii', 'ignore')
+        if user_message ==  '!':
+            return
         cmd_issuer = self.get_username(e)
-        if cmd_issuer in self.restricted_users_list and e.arguments[0].startswith('!'):
+        if cmd_issuer in self.restricted_users_list and user_message.startswith('!'):
             RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] = RESTRICTED_USERS_COMMAND_COUNT.get(cmd_issuer, 0) + 1
             if RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] > 5:
                 c.privmsg(self.channel, '%s your use of commands has been suspended temporarily for overusage Kappa' % (cmd_issuer))
                 return
 
-        if not e.arguments[0].startswith('!'):
+        # give a streamer shoutout if viewer is in the approved streamers set
+        # and streamer has not already gotten a shout out
+        # (i.e., manual shoutout with !so <username> command)
+        if not user_message.startswith('!'):
             self.auto_streamer_shoutout(e)
         else:
             # If a chat message starts with an exclamation point, try to run it as a command
             try:
-                parsed_args = map(lambda x: str(x).lower(), e.arguments[0].split(' '))
+                parsed_args = map(lambda x: str(x).lower(), encode_ascii_string(user_message).split(' '))
             except UnicodeEncodeError:
                 print >> ERROR_FILE, "[UnicodeEncodeError], Error parsing command."
                 return
+            ##TODO: REPLACE WITH REGEX
             cmd = parsed_args[0].replace('!','')
             cmd_args = []
             if len(parsed_args) > 1:
-                cmd_args = parsed_args[1:]
+                cmd_args = map(lambda x: x.replace('@',''), parsed_args[1:])
             print >> OUTPUT_FILE, 'Received command: %s with args: %s' % (cmd, ', '.join(cmd_args))
             self.do_command(e, cmd_issuer, cmd, cmd_args)
             return
@@ -194,7 +201,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     def get_username(self, e):
         ''' Returns username for given event. '''
         user = [d['value'] for d in e.tags if d['key'] == 'display-name'][0]
-        return user.lower()
+        return encode_ascii_string(user.lower())
 
     def user_is_mod(self, e):
         ''' Returns whether user has mod permissions. '''
@@ -210,21 +217,17 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def get_last_game_played(self, twitch_channel_id):
         ''' Returns last game played for given channel id. '''
-        try:
-            url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
-            headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-            r = requests.get(url, headers=headers).json()
-            return r['game']
-        except:
-            print >> ERROR_FILE, 'Error encountered while attempting to resolve last game played for channel id %s' % (channel_id)
-            return None
+        url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
+        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+        r = requests.get(url, headers=headers).json()
+        return encode_ascii_string(r['game'])
 
     def get_channel_title(self, e):
         ''' Returns channel title. '''
         url = 'https://api.twitch.tv/kraken/channels/' + self.channel_id
         headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
         r = requests.get(url, headers=headers).json()
-        return r['status']
+        return encode_ascii_string(r['status'])
 
     def current_death_count(self, c):
         ''' Returns current death count. '''
@@ -237,6 +240,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         ''' Determines whether user is valid for giving shout outs to or should be ignored. '''
         return (user not in self.ignored_users_list)
 
+    def format_streamer_shoutout_message(self, user, game):
+        message = CUSTOM_USER_SHOUTOUTS.get(user, self.user_shoutout_message_template)
+        if MSG_USERNAME_REPLACE_STRING in message:
+            message = message.replace(MSG_USERNAME_REPLACE_STRING, user)
+        if MSG_LAST_GAME_PLAYED_REPLACE_STRING in message:
+            message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
+        return encode_ascii_string(message)
+
+
     def streamer_shoutout_message(self, user):
         ''' Gives a streamer shoutout in twitch chat. '''
         if not self.is_valid_user(user):
@@ -248,21 +260,20 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             return
         cid = self.get_channel_id(user)
         game = self.get_last_game_played(cid)
-        if str(game) == 'None':
+        if str(game) == 'None' and not user in CUSTOM_USER_SHOUTOUTS.keys():
             if user in APPROVED_AUTO_SHOUTOUT_USERS.keys():
                 message = '%s streams but they are keeping their last game a played a secret Kappa' % (user)
             else:
-                message = '%s is not a streamer BibleThump'
+                message = '%s is not a streamer BibleThump' % (user)
         else:
-            message = CUSTOM_USER_SHOUTOUTS.get(user, self.user_shoutout_message_template)
-            message = message.replace(MSG_USERNAME_REPLACE_STRING, user)
-            message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
+            message = self.format_streamer_shoutout_message(user, game)
             USERS_CHECKED.add(user)
         c.privmsg(self.channel, message)
         return
 
     def auto_streamer_shoutout(self, e):
         ''' Gives an automated streamer shoutout. '''
+        c = self.connection
         user = self.get_username(e)
         if user in USERS_CHECKED:
             return
@@ -393,7 +404,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, self.custom_hype_message)
         elif cmd == 'death':
             self.current_death_count(c)
-        elif cmd == 'print':
+        elif cmd == 'print' and len(self.queue_names_list) > 0:
             self.print_all_queues()
         elif cmd in self.queue_names_list:
             if not cmd_args:
@@ -419,7 +430,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             elif cmd == 'deathinit':
                 self.death_count = int(cmd_args[0])
                 c.privmsg(self.channel, "%s initialized their current death count to %s" % (self.channel_display_name, self.death_count))
-            elif cmd == "so":
+            elif cmd == "so" and len(cmd_args) > 0:
                 self.streamer_shoutout_message(cmd_args[0])
         elif cmd_issuer == self.channel_display_name:
             if cmd == "streameraddnew":
