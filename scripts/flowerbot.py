@@ -215,6 +215,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         r = requests.get(url, headers=headers).json()
         return r['users'][0]['_id']
 
+    def get_last_game_played_by_username(self, user):
+        ''' Returns last game played for given twitch username. '''
+        try:
+            cid = self.get_channel_id(user)
+            game = self.get_last_game_played(cid)
+        except:
+            game = ''
+        return game
+
     def get_last_game_played(self, twitch_channel_id):
         ''' Returns last game played for given channel id. '''
         url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
@@ -248,7 +257,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
         return encode_ascii_string(message)
 
-
     def streamer_shoutout_message(self, user):
         ''' Gives a streamer shoutout in twitch chat. '''
         if not self.is_valid_user(user):
@@ -258,16 +266,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if user == self.channel_display_name:
             c.privmsg(self.channel, 'Jebaited')
             return
-        cid = self.get_channel_id(user)
-        game = self.get_last_game_played(cid)
-        if str(game) == 'None' and not user in CUSTOM_USER_SHOUTOUTS.keys():
-            if user in APPROVED_AUTO_SHOUTOUT_USERS.keys():
-                message = '%s streams but they are keeping their last game a played a secret Kappa' % (user)
-            else:
-                message = '%s is not a streamer BibleThump' % (user)
-        else:
+
+        game = self.get_last_game_played_by_username(user)
+        if (game == '' and (user in APPROVED_AUTO_SHOUTOUT_USERS.keys() or user in CUSTOM_USER_SHOUTOUTS.keys())) or game != '':
             message = self.format_streamer_shoutout_message(user, game)
-            USERS_CHECKED.add(user)
+        elif str(game) == '' and user in APPROVED_AUTO_SHOUTOUT_USERS.keys():
+            message = '%s streams but they are keeping their last game a played a secret Kappa' % (user)
+        else:
+            message = '%s is not a streamer xcornfOXTEAR' % (user)
+        USERS_CHECKED.add(user)
         c.privmsg(self.channel, message)
         return
 
