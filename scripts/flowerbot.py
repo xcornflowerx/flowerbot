@@ -6,12 +6,14 @@ import os
 import optparse
 import MySQLdb
 import csv
+import random
 
 # ---------------------------------------------------------------------------------------------
 # globals
 OUTPUT_FILE = sys.stdout
 ERROR_FILE = sys.stderr
 
+AUTOBOT_RESPONSES = {}
 APPROVED_AUTO_SHOUTOUT_USERS = {}
 CUSTOM_USER_SHOUTOUTS = {}
 USERS_CHECKED = set()
@@ -37,6 +39,7 @@ IGNORED_USERS_LIST = 'ignored_users_list'
 RESTRICTED_USERS_LIST = 'restricted_users_list'
 RESTRICTED_USERS_COMMAND_COUNT = {}
 QUEUE_NAMES_LIST = 'queue_names_list'
+AUTOBOT_RESPONSES_FILE = 'auto_bot_responses_file'
 
 # db properties
 DB_HOST = 'db.host'
@@ -114,6 +117,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.client_id = properties[CLIENT_ID]
         self.token = properties[CLIENT_SECRETS]
         self.auto_shoutout_users_file = properties.get(AUTO_SHOUTOUT_USERS_FILE, '')
+        self.auto_bot_responses_file = properties.get(AUTOBOT_RESPONSES_FILE, '')
         self.custom_shoutouts_file = properties.get(CUSTOM_SHOUTOUTS_FILE, '')
         self.death_count = 0
         self.channel_id = self.get_channel_id(properties[CHANNEL])
@@ -132,6 +136,10 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if self.auto_shoutout_users_file != '' and os.path.exists(self.auto_shoutout_users_file):
             self.init_auto_shoutout_users(self.auto_shoutout_users_file)
 
+        # init auto responses for bot (optional)
+        if self.auto_bot_responses_file != '' and os.path.exists(self.auto_bot_responses_file):
+            self.init_autobot_responses(self.auto_bot_responses_file)
+
         if self.custom_shoutouts_file != '' and os.path.exists(self.custom_shoutouts_file):
             self.init_custom_shoutout_users(self.custom_shoutouts_file)
 
@@ -146,6 +154,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         with open (auto_shoutout_users_filename, 'rU') as auto_shoutout_users_file:
             for username in auto_shoutout_users_file.readlines():
                 APPROVED_AUTO_SHOUTOUT_USERS[username.strip()] = False
+
+    def init_autobot_responses(self, auto_bot_responses_filename):
+        with open(auto_bot_responses_filename, 'rU') as auto_bot_responses_file:
+            for line in csv.DictReader(auto_bot_responses_file, dialect = 'excel-tab'):
+                message = line['MESSAGE'].lower().strip()
+                bot_responses = AUTOBOT_RESPONSES.get(message, [])
+                bot_responses.append(line['RESPONSE'])
+                AUTOBOT_RESPONSES[message] = list(set(bot_responses))
 
     def init_custom_shoutout_users(self, custom_shoutouts_filename):
         with open(custom_shoutouts_filename, 'rU') as custom_shoutouts_file:
@@ -165,8 +181,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
-        user_message = e.arguments[0].encode('ascii', 'ignore')
+        user_message = e.arguments[0].encode('ascii', 'ignore').strip().lower()
         if user_message ==  '!':
+            return
+        if user_message in AUTOBOT_RESPONSES.keys():
+            self.send_auto_bot_response(user_message)
             return
         cmd_issuer = self.get_username(e)
         if cmd_issuer in self.restricted_users_list and user_message.startswith('!'):
@@ -194,6 +213,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 cmd_args = map(lambda x: x.replace('@',''), parsed_args[1:])
             print >> OUTPUT_FILE, 'Received command: %s with args: %s' % (cmd, ', '.join(cmd_args))
             self.do_command(e, cmd_issuer, cmd, cmd_args)
+            return
+
+    def send_auto_bot_response(self, message):
+        ''' Sends custom response to matching messages in chat. '''
+        c = self.connection
+        response = ''
+        if len(AUTOBOT_RESPONSES[message]) == 1:
+            response = AUTOBOT_RESPONSES[message][0]
+        else:
+            response = random.choice(AUTOBOT_RESPONSES[message])
+        if response:
+            c.privmsg(self.channel, response)
             return
 
     # ---------------------------------------------------------------------------------------------
@@ -455,4 +486,7 @@ def main():
     bot.start()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print >> OUTPUT_FILE, '\nBye!'

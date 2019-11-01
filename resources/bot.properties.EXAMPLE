@@ -23,3 +23,4 @@ hype.message=
 ignored_users_list=nightbot,streamelements
 restricted_users_list=
 queue_names_list=
+auto_bot_responses_file=

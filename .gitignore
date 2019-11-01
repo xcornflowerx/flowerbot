@@ -1,3 +1,4 @@
+resources/data/autobot_responses.txt
 resources/data/approved_streamers.txt
 resources/*.properties
 resources/data/custom_shoutout_messages.txt

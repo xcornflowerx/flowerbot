@@ -38,6 +38,7 @@ ignored_users_list= # comma-delimited list of users to ignore when giving an aut
 restricted_users_list = # comma-delimited list of users with restricted access to command usage
 queue_names_list= # comma-delimited list of queues that users can join
 custom.user_shoutout_message = # auto shoutout user message template. Add ${username} to auto-insert username and ${lastgameplayed} to auto-insert user's last game played
+auto_bot_responses_file= # path to tab-delimited file containing custom automated responses for bot to send in response to certain user messages
 ```
 
 Flowerbot customization and additional documentation:
