@@ -251,7 +251,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
         headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
         r = requests.get(url, headers=headers).json()
-        return encode_ascii_string(r['game'])
+        try:
+            game = encode_ascii_string(r['game'])
+        except:
+            game = 'None'
+        return game
 
     def get_channel_title(self, e):
         ''' Returns channel title. '''
