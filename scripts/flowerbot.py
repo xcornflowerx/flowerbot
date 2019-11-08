@@ -220,6 +220,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         c.cap('REQ', ':twitch.tv/commands')
         c.join(self.channel)
 
+    def on_all_raw_messages(self, c, e):
+        print >> OUTPUT_FILE, e
+
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
 
