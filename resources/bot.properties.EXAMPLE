@@ -19,7 +19,6 @@ server.port=6667
 # custom properties
 auto_shoutout_users_file=
 custom_shoutouts_file=
-hype.message=
 ignored_users_list=nightbot,streamelements
 restricted_users_list=
 queue_names_list=
