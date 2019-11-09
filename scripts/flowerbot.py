@@ -34,7 +34,6 @@ CHANNEL_TRUSTED_USERS_LIST = 'channel.trusted_users_list'
 AUTO_SHOUTOUT_USERS_FILE = 'auto_shoutout_users_file'
 CUSTOM_SHOUTOUTS_FILE = 'custom_shoutouts_file'
 CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE = 'custom.user_shoutout_message'
-CUSTOM_HYPE_MESSAGE = 'hype.message'
 IGNORED_USERS_LIST = 'ignored_users_list'
 RESTRICTED_USERS_LIST = 'restricted_users_list'
 RESTRICTED_USERS_COMMAND_COUNT = {}
@@ -55,7 +54,7 @@ MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
 DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For some ${lastgameplayed} action, check them out some time at https://www.twitch.tv/${username}'
 
 # valid commands
-VALID_COMMANDS = ['game', 'title', 'hype', 'so', 'death', 'print',
+VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
     'queueinit', 'score', 'streameraddnew', 'deathadd', 'deathreset',
     'deathinit', 'uptime', 'shoutout', 'songs', 'sr']
 
@@ -122,7 +121,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.death_count = 0
         self.channel_id = self.get_channel_id(properties[CHANNEL])
         self.trusted_users_list = properties[CHANNEL_TRUSTED_USERS_LIST]
-        self.custom_hype_message = properties.get(CUSTOM_HYPE_MESSAGE, '')
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
         self.restricted_users_list = properties.get(RESTRICTED_USERS_LIST, [])
         self.queue_names_list = properties.get(QUEUE_NAMES_LIST, [])
@@ -435,12 +433,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         elif cmd == "title":
             title = self.get_channel_title(self.channel_id)
             c.privmsg(self.channel, self.channel_display_name + ' channel title is currently ' + title)
-        elif cmd == 'hype' and self.custom_hype_message:
-            c.privmsg(self.channel, self.custom_hype_message)
         elif cmd == 'death':
             self.current_death_count(c)
         elif cmd == 'print' and len(self.queue_names_list) > 0:
             self.print_all_queues()
+        elif cmd == 'score' and len(self.queue_names_list) > 0:
+            self.print_current_score()
         elif cmd in self.queue_names_list:
             if not cmd_args:
                 self.add_user_to_queue(cmd_issuer, cmd)
@@ -453,8 +451,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.print_current_score()
         elif cmd == 'queueinit' and cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
             self.init_new_queue_list(cmd_args)
-        elif cmd == 'score':
-            self.print_current_score()
         elif user_has_mod_privileges:
             if cmd == 'deathadd':
                 self.death_count += 1
