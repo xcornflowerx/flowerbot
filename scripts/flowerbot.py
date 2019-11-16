@@ -7,6 +7,7 @@ import optparse
 import MySQLdb
 import csv
 import random
+import operator
 
 # ---------------------------------------------------------------------------------------------
 # globals
@@ -40,6 +41,15 @@ RESTRICTED_USERS_COMMAND_COUNT = {}
 QUEUE_NAMES_LIST = 'queue_names_list'
 AUTOBOT_RESPONSES_FILE = 'auto_bot_responses_file'
 
+# flowermons properties
+FLOWERMONS_ENABLED = 'flowermons.enabled'
+FLOWERMONS_FILENAME = 'flowermons.filename'
+FLOWERMONS_USER_DATA_FILENAME = 'flowermons.user_data_filename'
+FLOWERMONS_SUBS_ONLY_MODE = 'flowermons.subs_only_mode'
+FLOWERMONS_DEFAULT_POKEBALL_LIMIT = 'flowermons.default_pokeball_limit'
+FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT = 'flowermons.subs_pokeball_limit'
+
+
 # db properties
 DB_HOST = 'db.host'
 DB_NAME = 'db.db_name'
@@ -50,13 +60,18 @@ DB_PORT = 'db.port'
 MSG_USERNAME_REPLACE_STRING = '${username}'
 MSG_LAST_GAME_PLAYED_REPLACE_STRING = '${lastgameplayed}'
 MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
-
 DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For some ${lastgameplayed} action, check them out some time at https://www.twitch.tv/${username}'
+
+# FLOWERMONS
+FLOWERMONS_POKEDEX = set()
+FLOWERMONS_USER_POKEDEX = {}
+FLOWERMONS_USER_POKEBALLS = {}
 
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
     'queueinit', 'score', 'streameraddnew', 'deathadd', 'deathreset',
-    'deathinit', 'uptime', 'shoutout', 'songs', 'sr']
+    'deathinit', 'uptime', 'shoutout', 'songs', 'sr',
+    'flowerdex', 'catch']
 
 # ---------------------------------------------------------------------------------------------
 # db functions
@@ -124,6 +139,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
         self.restricted_users_list = properties.get(RESTRICTED_USERS_LIST, [])
         self.queue_names_list = properties.get(QUEUE_NAMES_LIST, [])
+        self.flowermons_enabled = (properties.get(FLOWERMONS_ENABLED, 'false') == 'true')
+        self.flowermons_filename = properties.get(FLOWERMONS_FILENAME, '')
+        self.flowermons_user_data_filename = properties.get(FLOWERMONS_USER_DATA_FILENAME, '')
+        self.flowermons_subs_only_mode = (properties.get(FLOWERMONS_SUBS_ONLY_MODE, 'false') == 'true')
+        self.flowermons_default_pokeball_limit = int(properties.get(FLOWERMONS_DEFAULT_POKEBALL_LIMIT, 3))
+        self.flowermons_subscribers_pokeball_limit = int(properties.get(FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT, 10))
 
         self.user_shoutout_message_template = DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE
         if CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE in properties and properties[CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE]:
@@ -140,6 +161,13 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
         if self.custom_shoutouts_file != '' and os.path.exists(self.custom_shoutouts_file):
             self.init_custom_shoutout_users(self.custom_shoutouts_file)
+
+        if self.flowermons_enabled:
+            if self.flowermons_filename != '' and os.path.exists(self.flowermons_filename):
+                self.init_flowermons_pokedex(self.flowermons_filename)
+            if self.flowermons_user_data_filename != '':
+                self.load_flowermons_user_data(self.flowermons_user_data_filename)
+
 
         server = properties[IRC_CHAT_SERVER]
         port = int(properties[IRC_CHAT_SERVER_PORT])
@@ -168,6 +196,21 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     print >> ERROR_FILE, 'Custom shoutout file does not contain one or more of required headers:: "TWITCH_USERNAME", "SHOUTOUT_MESSAGE"'
                     sys.exit(2)
                 CUSTOM_USER_SHOUTOUTS[record['TWITCH_USERNAME']] = record['SHOUTOUT_MESSAGE']
+
+    def init_flowermons_pokedex(self, flowermons_filename):
+        with open(flowermons_filename, 'rU') as flowermons_file:
+            for line in flowermons_file.readlines():
+                FLOWERMONS_POKEDEX.add(line.strip().lower())
+
+    def load_flowermons_user_data(self, flowermons_user_data_filename):
+        if os.path.exists(flowermons_user_data_filename):
+            with open(flowermons_user_data_filename, 'rU') as flowermons_user_data_file:
+                for line in flowermons_user_data_file.readlines():
+                    data = map(lambda x: x.strip().lower(), line.split('\t'))
+                    username = data[0]
+                    user_pokemon_set = FLOWERMONS_USER_POKEDEX.get(username, set())
+                    user_pokemon_set.add(data[1])
+                    FLOWERMONS_USER_POKEDEX[username] = user_pokemon_set
 
     def on_welcome(self, c, e):
         ''' Handle welcome. '''
@@ -237,6 +280,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         val = [d['value'] for d in e.tags if d['key'] == 'mod'][0]
         return (val == '1')
 
+    def user_is_sub(self, e):
+        ''' Returns whether user is a subscriber. '''
+        val = [d['value'] for d in e.tags if d['key'] == 'subscriber'][0]
+        return (val == '1')
+
     def get_channel_id(self, twitch_channel):
         ''' Returns the twitch channel id. '''
         url = 'https://api.twitch.tv/kraken/users?login=' + twitch_channel
@@ -280,7 +328,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if MSG_LAST_GAME_PLAYED_REPLACE_STRING in message:
             message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
         return encode_ascii_string(message)
-
 
     def streamer_shoutout_message(self, user):
         ''' Gives a streamer shoutout in twitch chat. '''
@@ -419,12 +466,120 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         return
 
     # ---------------------------------------------------------------------------------------------
+    # FLOWERMONS
+
+    def format_flowerdex_check_message(self, cmd_issuer, user_is_sub):
+        caught_mons = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
+        if len(caught_mons) > 0:
+            message = '@%s your FlowerDex is %s%% complete and you have %s Flowerballs left!' % (cmd_issuer, self.calculate_flowerdex_completion(cmd_issuer), self.get_users_pokeball_count(cmd_issuer, user_is_sub))
+        else:
+            message = '@%s you have not caught any pokemon yet :(' % (cmd_issuer)
+        return message
+
+    def check_flowerdex(self, cmd_issuer, user_is_sub):
+        c = self.connection
+        c.privmsg(self.channel, self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
+        return
+
+    def calculate_flowerdex_completion(self, cmd_issuer):
+        caught_mons = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
+        return (100 * len(caught_mons) / len(FLOWERMONS_POKEDEX))
+
+    def catch_flowermon(self, cmd_issuer, user_is_sub):
+        ''' Catches random pokemon for user and stores mon in flowerdex. '''
+        c = self.connection
+        pokeballs = self.get_users_pokeball_count(cmd_issuer, user_is_sub)
+        if pokeballs == 0:
+            c.privmsg(self.channel, '@%s, you do not have any flowerballs left! xcornfOXTEAR' % (cmd_issuer))
+            return
+        pokemon = random.choice(list(FLOWERMONS_POKEDEX))
+        self.store_caught_pokemon(cmd_issuer, pokemon)
+
+        FLOWERMONS_USER_POKEBALLS[cmd_issuer] = pokeballs - 1
+
+        message = '@%s caught %s! %s' % (cmd_issuer, pokemon.title(), self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
+        if pokemon == 'jigglypuff' and cmd_issuer != 'vudoo781':
+            message += '... speaking of jigglypuff ... @vudoo781 would like a word with you Kappa'
+        try:
+            c.privmsg(self.channel, message)
+        except Exception as e:
+            print >> OUTPUT_FILE, e
+            print >> OUTPUT_FILE, message
+            c.privmsg(self.channel, 'whoops BibleThump @%s broke me snowpoNK' % (cmd_issuer))
+        return
+
+    def store_caught_pokemon(self, cmd_issuer, pokemon):
+        ''' Stores pokemon in data file for user. '''
+        user_pokemon_set = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
+        user_pokemon_set.add(pokemon)
+        FLOWERMONS_USER_POKEDEX[cmd_issuer] = user_pokemon_set
+        self.update_flowermons_user_pokedex_data_file()
+
+    def update_flowermons_user_pokedex_data_file(self):
+        ''' Updates Flowermons user data file. '''
+        with open(self.flowermons_user_data_filename, 'w') as flowermons_user_data_file:
+            for user, user_pokemon_set in FLOWERMONS_USER_POKEDEX.items():
+                for pokemon in user_pokemon_set:
+                    flowermons_user_data_file.write('%s\t%s\n' % (user, pokemon))
+
+    def get_users_pokeball_count(self, cmd_issuer, user_is_sub):
+        ''' Returns number of pokeballs user has left. '''
+        if not cmd_issuer in FLOWERMONS_USER_POKEBALLS.keys():
+            if user_is_sub:
+                FLOWERMONS_USER_POKEBALLS[cmd_issuer] = self.flowermons_subscribers_pokeball_limit
+            else:
+                FLOWERMONS_USER_POKEBALLS[cmd_issuer] = self.flowermons_default_pokeball_limit
+        return FLOWERMONS_USER_POKEBALLS[cmd_issuer]
+
+    def print_flowerdex_leaders_message(self):
+        ''' Prings current FlowerDex leaders. '''
+        c = self.connection
+        if len(FLOWERMONS_USER_POKEDEX) == 0:
+            return
+        flowerdex_leaders = self.get_flowerdex_leaders_set()
+        message = "Current top 5 FlowerDex leaders are:  %s (%s%%)" % (', '.join(flowerdex_leaders[0][1]), flowerdex_leaders[0][0])
+        if len(flowerdex_leaders) > 1:
+            for flowerdex_completion_value,tied_users_by_flowerdex_completion_value in flowerdex_leaders[1:]:
+                message += "  //  %s (%s%%)" % (', '.join(tied_users_by_flowerdex_completion_value), flowerdex_completion_value)
+        c.privmsg(self.channel, message)
+        return
+
+    def get_flowerdex_leaders_set(self):
+        '''
+            Returns the 5 users with the most (unique) flowermons.
+            If multiple users are tied for 5th then they are also included in the set of users returned.
+        '''
+        flowerdex_completion_by_values = {}
+        for user in FLOWERMONS_USER_POKEDEX.keys():
+            flowerdex_completion_value = self.calculate_flowerdex_completion(user)
+            tied_users_by_flowerdex_completion_value = flowerdex_completion_by_values.get(flowerdex_completion_value, [])
+            tied_users_by_flowerdex_completion_value.append(user)
+            flowerdex_completion_by_values[flowerdex_completion_value] = tied_users_by_flowerdex_completion_value
+        leaders = []
+        for flowerdex_completion_value,tied_users_by_flowerdex_completion_value in sorted(flowerdex_completion_by_values.items(), key = operator.itemgetter(0), reverse = True):
+            leaders.append((flowerdex_completion_value, tied_users_by_flowerdex_completion_value))
+            if len(leaders) >= 5:
+                break
+        return leaders
+
+    def purchase_flowerballs(self, username, num_bits_used, user_is_sub):
+        ''' Add balls for users who purchase pokeballs for bits. A bonus ball is given for every 200 bits donated. '''
+        balls_purchased = num_bits_used / 50
+        bonus_balls = num_bits_used / 200;
+        current_num_balls = self.get_users_pokeball_count(username, user_is_sub)
+        FLOWERMONS_USER_POKEBALLS[username] = current_num_balls + balls_purchased + bonus_balls
+        c = self.connection
+        c.privmsg(self.channel, '%s now has %s flowerballs!' % (username, FLOWERMONS_USER_POKEBALLS[username]))
+        return
+
+    # ---------------------------------------------------------------------------------------------
     # BOT MAIN
     def do_command(self, e, cmd_issuer, cmd, cmd_args):
         c = self.connection
         user_has_mod_privileges = False
         if self.user_is_mod(e) or cmd_issuer in self.trusted_users_list:
             user_has_mod_privileges = True
+        user_is_sub = self.user_is_sub(e)
 
         if cmd == "game":
             game = self.get_last_game_played(self.channel_id)
@@ -449,6 +604,22 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             elif 'win' in cmd_args and cmd_issuer == self.channel_display_name:
                 QUEUE_SCORE[cmd] = QUEUE_SCORE.get(cmd, 0) + 1
                 self.print_current_score()
+        elif cmd in ['flowerdex', 'catch', 'addballs']:
+            if cmd == 'addballs' and cmd_issuer == self.channel_display_name:
+                username = cmd_args[0].replace('@', '')
+                num_bits_used = int(cmd_args[1])
+                self.purchase_flowerballs(username, num_bits_used, user_is_sub)
+                return
+            if self.flowermons_subs_only_mode and not user_is_sub:
+                c.privmsg(self.channel, 'Flowermons is running in subs-only mode.')
+            else:
+                if cmd == 'flowerdex':
+                    if len(cmd_args) > 0 and cmd_args[0] == 'leaders':
+                        self.print_flowerdex_leaders_message()
+                    else:
+                        self.check_flowerdex(cmd_issuer, user_is_sub)
+                elif cmd == 'catch':
+                    self.catch_flowermon(cmd_issuer, user_is_sub)
         elif cmd == 'queueinit' and cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
             self.init_new_queue_list(cmd_args)
         elif user_has_mod_privileges:

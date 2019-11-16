@@ -23,3 +23,11 @@ ignored_users_list=nightbot,streamelements
 restricted_users_list=
 queue_names_list=
 auto_bot_responses_file=
+
+# flowermons file
+flowermons.enabled=false
+flowermons.filename=
+flowermons.user_data_filename=
+flowermons.subs_only_mode=false
+flowermons.default_pokeball_limit=3
+flowermons.subs_pokeball_limit=10
