@@ -223,8 +223,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
         user_message = e.arguments[0].encode('ascii', 'ignore').strip().lower()
-        if user_message ==  '!':
-            return
         if user_message in AUTOBOT_RESPONSES.keys():
             self.send_auto_bot_response(user_message)
             return
@@ -249,6 +247,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 return
             ##TODO: REPLACE WITH REGEX
             cmd = parsed_args[0].replace('!','')
+            if not cmd:
+                return
             cmd_args = []
             if len(parsed_args) > 1:
                 cmd_args = map(lambda x: x.replace('@',''), parsed_args[1:])
@@ -562,7 +562,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 break
         return leaders
 
-    def purchase_flowerballs(self, username, num_bits_used, user_is_sub):
+    def add_balls_purchased_with_bits(self, username, num_bits_used, user_is_sub):
         ''' Add balls for users who purchase pokeballs for bits. A bonus ball is given for every 200 bits donated. '''
         balls_purchased = num_bits_used / 50
         bonus_balls = num_bits_used / 200;
@@ -570,6 +570,27 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         FLOWERMONS_USER_POKEBALLS[username] = current_num_balls + balls_purchased + bonus_balls
         c = self.connection
         c.privmsg(self.channel, '%s now has %s flowerballs!' % (username, FLOWERMONS_USER_POKEBALLS[username]))
+        return
+
+    def add_balls_by_amount(self, username, num_balls, user_is_sub):
+        ''' Add balls for users who purchase pokeballs for bits. A bonus ball is given for every 200 bits donated. '''
+        current_num_balls = self.get_users_pokeball_count(username, user_is_sub)
+        FLOWERMONS_USER_POKEBALLS[username] = current_num_balls + num_balls
+        c = self.connection
+        c.privmsg(self.channel, '%s now has %s flowerballs!' % (username, FLOWERMONS_USER_POKEBALLS[username]))
+        return
+
+    def purchase_flowerballs(self, username, purchase_type, ball_or_bits_amount, user_is_sub):
+        ''' Add balls for user by bits purchased or actual number of balls to add. '''
+        if purchase_type in ['bits', 'dollars']:
+            if purchase_type == 'dollars':
+                ball_or_bits_amount = ball_or_bits_amount * 100
+            self.add_balls_purchased_with_bits(username, ball_or_bits_amount, user_is_sub)
+        elif purchase_type == 'balls':
+            self.add_balls_by_amount(username, ball_or_bits_amount, user_is_sub)
+        else:
+            c = self.connection
+            c.privmsg(self.channel, '"%s" is an invalid way to add balls for a user' % (purchase_type))
         return
 
     # ---------------------------------------------------------------------------------------------
@@ -604,20 +625,20 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             elif 'win' in cmd_args and cmd_issuer == self.channel_display_name:
                 QUEUE_SCORE[cmd] = QUEUE_SCORE.get(cmd, 0) + 1
                 self.print_current_score()
-        elif cmd in ['flowerdex', 'catch', 'addballs']:
+        elif cmd in ['flowerdex', 'catch', 'addballs', 'leaders']:
             if cmd == 'addballs' and cmd_issuer == self.channel_display_name:
-                username = cmd_args[0].replace('@', '')
-                num_bits_used = int(cmd_args[1])
-                self.purchase_flowerballs(username, num_bits_used, user_is_sub)
+                username = cmd_args[0]
+                purchase_type = cmd_args[1]
+                ball_or_bits_amount = int(float(cmd_args[2]))
+                self.purchase_flowerballs(username, purchase_type, ball_or_bits_amount, user_is_sub)
                 return
             if self.flowermons_subs_only_mode and not user_is_sub:
                 c.privmsg(self.channel, 'Flowermons is running in subs-only mode.')
             else:
                 if cmd == 'flowerdex':
-                    if len(cmd_args) > 0 and cmd_args[0] == 'leaders':
-                        self.print_flowerdex_leaders_message()
-                    else:
-                        self.check_flowerdex(cmd_issuer, user_is_sub)
+                    self.check_flowerdex(cmd_issuer, user_is_sub)
+                elif cmd == 'leaders':
+                    self.print_flowerdex_leaders_message()
                 elif cmd == 'catch':
                     self.catch_flowermon(cmd_issuer, user_is_sub)
         elif cmd == 'queueinit' and cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
