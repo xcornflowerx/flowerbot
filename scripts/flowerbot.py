@@ -222,6 +222,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
+
+        # give a streamer shoutout if viewer is in the approved streamers set
+        # and streamer has not already gotten a shout out
+        # (i.e., manual shoutout with !so <username> command)
+        self.auto_streamer_shoutout(e)
+
         user_message = e.arguments[0].encode('ascii', 'ignore').strip().lower()
         if user_message in AUTOBOT_RESPONSES.keys():
             self.send_auto_bot_response(user_message)
@@ -233,40 +239,40 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 c.privmsg(self.channel, '%s your use of commands has been suspended temporarily for overusage Kappa' % (cmd_issuer))
                 return
 
-        # give a streamer shoutout if viewer is in the approved streamers set
-        # and streamer has not already gotten a shout out
-        # (i.e., manual shoutout with !so <username> command)
-        if not user_message.startswith('!'):
-            self.auto_streamer_shoutout(e)
-        else:
-            # If a chat message starts with an exclamation point, try to run it as a command
-            try:
-                parsed_args = map(lambda x: str(x).lower(), encode_ascii_string(user_message).split(' '))
-            except UnicodeEncodeError:
-                print >> ERROR_FILE, "[UnicodeEncodeError], Error parsing command."
-                return
-            ##TODO: REPLACE WITH REGEX
-            cmd = parsed_args[0].replace('!','')
-            if not cmd:
-                return
-            cmd_args = []
-            if len(parsed_args) > 1:
-                cmd_args = map(lambda x: x.replace('@',''), parsed_args[1:])
-            print >> OUTPUT_FILE, 'Received command: %s with args: %s' % (cmd, ', '.join(cmd_args))
-            self.do_command(e, cmd_issuer, cmd, cmd_args)
+        # If a chat message starts with an exclamation point, try to run it as a command
+        try:
+            parsed_args = map(lambda x: str(x).lower(), encode_ascii_string(user_message).split(' '))
+        except UnicodeEncodeError:
+            print >> ERROR_FILE, "[UnicodeEncodeError], Error parsing command."
             return
+        ##TODO: REPLACE WITH REGEX
+        if not parsed_args[0].startswith('!'):
+            return
+        cmd = parsed_args[0].replace('!','')
+        cmd_args = []
+        if len(parsed_args) > 1:
+            cmd_args = map(lambda x: x.replace('@',''), parsed_args[1:])
+        print >> OUTPUT_FILE, 'Received command: %s with args: %s' % (cmd, ', '.join(cmd_args))
+        try:
+            self.do_command(e, cmd_issuer, cmd, cmd_args)
+        except Exception as e:
+            print >> OUTPUT_FILE, e
+        return
 
     def send_auto_bot_response(self, message):
-        ''' Sends custom response to matching messages in chat. '''
+        '''
+            Sends custom response to matching messages in chat.
+            Always send response if message startswith '!', otherwise
+            randomly decide whether to send response.
+        '''
         c = self.connection
-        response = ''
-        if len(AUTOBOT_RESPONSES[message]) == 1:
-            response = AUTOBOT_RESPONSES[message][0]
-        else:
-            response = random.choice(AUTOBOT_RESPONSES[message])
-        if response:
+        response = response = random.choice(AUTOBOT_RESPONSES[message])
+        send_message = True
+        if not message.startswith('!'):
+            send_message = random.choice([True, False, False])
+        if response and send_message:
             c.privmsg(self.channel, response)
-            return
+        return
 
     # ---------------------------------------------------------------------------------------------
     # FETCH CHANNEL / USER DETAILS
@@ -282,8 +288,13 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def user_is_sub(self, e):
         ''' Returns whether user is a subscriber. '''
-        val = [d['value'] for d in e.tags if d['key'] == 'subscriber'][0]
-        return (val == '1')
+        sub_founder_status = False
+        for d in e.tags:
+            if d['key'] in ['subscriber', 'founder']:
+                if d['value'][0] == '1':
+                    sub_founder_status = True
+                    break
+        return sub_founder_status
 
     def get_channel_id(self, twitch_channel):
         ''' Returns the twitch channel id. '''
@@ -312,7 +323,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def current_death_count(self, c):
         ''' Returns current death count. '''
-        message = "@%s's current death count is %s ;___;" % (self.channel_display_name, self.death_count)
+        message = "@%s's current death count is %s" % (self.channel_display_name, self.death_count)
         c.privmsg(self.channel, message)
 
     # ---------------------------------------------------------------------------------------------
@@ -342,9 +353,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         game = self.get_last_game_played(cid)
         if str(game) == 'None' and not user in CUSTOM_USER_SHOUTOUTS.keys():
             if user in APPROVED_AUTO_SHOUTOUT_USERS.keys():
-                message = '%s streams but they are keeping their last game a played a secret Kappa' % (user)
+                message = "%s streams but they are keeping their last game a played a secret Kappa" % (user)
             else:
-                message = '%s is not a streamer BibleThump' % (user)
+                message = "%s is not a streamer BibleThump" % (user)
         else:
             message = self.format_streamer_shoutout_message(user, game)
             USERS_CHECKED.add(user)
@@ -376,34 +387,45 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     def add_user_to_queue(self, user, input_queue_name):
         ''' Adds user to specified queue. '''
         c = self.connection
-        other_queue_names = [queue for queue in self.queue_names_list if queue != input_queue_name]
-        for q in other_queue_names:
-            if user in USER_QUEUE.get(q, []):
-                message = 'Hey %s, you are already in the queue for %s! You cannot join a different queue without leaving the one you are already in first. Leave the queue by entering !%s leave' % (user, q, q)
-                c.privmsg(self.channel, message)
-                return
+        # check if user already exists in one of the available queues
+        (user_queue, user_position) = self.get_user_queue_and_position(user)
 
-        queue_list = USER_QUEUE.get(input_queue_name, [])
-        if user in queue_list:
-            message = 'Hey %s, you are already in the %s queue! Your position is #%s' % (user, input_queue_name, (queue_list.index(user) + 1))
+        # if user in another queue then user must leave it to enter a different queue
+        if user_queue:
+            if user_queue != input_queue_name:
+                message = "Hey %s, you are already in the queue for %s! You cannot join a different queue without leaving the one you are already in first. Leave the queue by entering '!leave'" % (user, user_queue)
+            else:
+                message = "Hey %s, you are already in the %s queue! Your position is #%s" % (user, user_queue, user_position)
         else:
+            queue_list = USER_QUEUE.get(input_queue_name, [])
             queue_list.append(user)
             USER_QUEUE[input_queue_name] = queue_list
             message = 'Hey %s, you have entered the queue for %s! Your position is #%s' % (user, input_queue_name, (queue_list.index(user) + 1))
         c.privmsg(self.channel, message)
         return
 
-    def kick_user_from_queue(self, user, input_queue_name):
+    def get_user_queue_and_position(self, user):
+        ''' Returns which queue the user is in and their position in the queue. '''
+        user_queue = ''
+        user_position = -1
+        for queue in self.queue_names_list:
+            queue_list = USER_QUEUE.get(queue, [])
+            if user in queue_list:
+                user_queue = queue
+                user_position = queue_list.index(user) + 1
+                break
+        return (user_queue, user_position)
+
+    def kick_user_from_queue(self, user):
         ''' Kicks user from specified queue. '''
         c = self.connection
-        queue_list = USER_QUEUE.get(input_queue_name, [])
-        if user in queue_list:
+        (user_queue_name, user_position) = self.get_user_queue_and_position(user)
+        if user_queue_name:
+            queue_list = USER_QUEUE.get(user_queue_name, [])
             queue_list.remove(user)
-            USER_QUEUE[input_queue_name] = queue_list
-            message = '%s has left the queue for %s' % (user, input_queue_name)
-        else:
-            message = '%s - you cannot leave a queue you are not in Jebaited' % (user)
-        c.privmsg(self.channel, message)
+            USER_QUEUE[user_queue_name] = queue_list
+            message = '%s has left the queue for %s' % (user, user_queue_name)
+            c.privmsg(self.channel, message)
         return
 
     def get_next_user_in_queue(self, input_queue_name):
@@ -443,11 +465,35 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         current_queues = []
         for q in self.queue_names_list:
             if len(USER_QUEUE.get(q, [])) > 0:
-                m = 'Current queue for %s: %s' % (q, ', '.join(USER_QUEUE[q]))
+                m = "Current queue for %s: %s" % (q, ', '.join(USER_QUEUE[q]))
             else:
-                m = 'Current queue for %s is empty BibleThump' % (q)
+                m = "Current queue for %s is empty BibleThump" % (q)
             current_queues.append(m)
         c.privmsg(self.channel, ';   '.join(current_queues))
+        return
+
+    def format_available_queues_message(self):
+        ''' Prints the available queues to join. '''
+        available_queues_message = "There aren't any queues available to join at this time."
+        if len(self.queue_names_list) > 0:
+            available_queues_message = "Available queue(s) to join: %s - use ![queue name] to join" % (', '.join(self.queue_names_list))
+        return available_queues_message
+
+    def print_available_queues(self):
+        ''' Shares which queues are available to join. '''
+        c = self.connection
+        c.privmsg(self.channel, self.format_available_queues_message())
+        return
+
+    def print_user_position_in_queue(self, user):
+        ''' Prints user's current position in queue. '''
+        c = self.connection
+        (user_queue, user_position) = self.get_user_queue_and_position(user)
+        if user_queue:
+            message = "Hey %s, you are in queue %s and your position is #%s" % (user, user_queue, user_position)
+        else:
+            message = "Hey %s, you are not in any queues yet. Use '!queues' to see which queues are available to join." % (user)
+        c.privmsg(self.channel, message)
         return
 
     def init_new_queue_list(self, queue_names_list):
@@ -456,12 +502,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         # confirm that the queue names are not already in the valid commands set so as to not confuse any bots
         invalid_queue_names = [q for q in queue_names_list if q in VALID_COMMANDS]
         if len(invalid_queue_names) > 0:
-            message = 'Cannot set queue names to names of commands which already exist! Invalid queue names: %s' % (', '.join(invalid_queue_names))
+            message = "Cannot set queue names to names of commands which already exist! Invalid queue names: %s" % (', '.join(invalid_queue_names))
         else:
             self.queue_names_list = queue_names_list[:]
             USER_QUEUE.clear()
             QUEUE_SCORE.clear()
-            message = 'Available queue(s) to join: %s' % (', '.join(queue_names_list))
+            message = self.format_available_queues_message()
         c.privmsg(self.channel, message)
         return
 
@@ -490,7 +536,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         c = self.connection
         pokeballs = self.get_users_pokeball_count(cmd_issuer, user_is_sub)
         if pokeballs == 0:
-            c.privmsg(self.channel, '@%s, you do not have any flowerballs left! xcornfOXTEAR' % (cmd_issuer))
+            c.privmsg(self.channel, '@%s, you do not have any flowerballs left! BibleThump' % (cmd_issuer))
             return
         pokemon = random.choice(list(FLOWERMONS_POKEDEX))
         self.store_caught_pokemon(cmd_issuer, pokemon)
@@ -615,17 +661,21 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.print_all_queues()
         elif cmd == 'score' and len(self.queue_names_list) > 0:
             self.print_current_score()
-        elif cmd in self.queue_names_list:
+        elif len(self.queue_names_list) > 0 and (cmd in self.queue_names_list):
             if not cmd_args:
                 self.add_user_to_queue(cmd_issuer, cmd)
-            elif 'leave' in cmd_args:
-                self.kick_user_from_queue(cmd_issuer, cmd)
+            elif 'leave' in cmd_args or cmd == 'leave':
+                self.kick_user_from_queue(cmd_issuer)
             elif 'next' in cmd_args and cmd_issuer == self.channel_display_name:
                 self.get_next_user_in_queue(cmd)
             elif 'win' in cmd_args and cmd_issuer == self.channel_display_name:
                 QUEUE_SCORE[cmd] = QUEUE_SCORE.get(cmd, 0) + 1
                 self.print_current_score()
-        elif cmd in ['flowerdex', 'catch', 'addballs', 'leaders']:
+            elif cmd in ['join', 'list', 'queues']:
+                self.print_available_queues()
+            elif cmd == 'position':
+                self.print_user_position_in_queue(cmd_issuer)
+        elif self.flowermons_enabled and cmd in ['flowerdex', 'catch', 'addballs', 'leaders']:
             if cmd == 'addballs' and cmd_issuer == self.channel_display_name:
                 username = cmd_args[0]
                 purchase_type = cmd_args[1]
