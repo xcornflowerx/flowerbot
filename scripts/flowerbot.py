@@ -4,7 +4,6 @@ import irc.bot
 import requests
 import os
 import optparse
-import MySQLdb
 import csv
 import random
 import operator
@@ -75,32 +74,21 @@ VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
 
 # ---------------------------------------------------------------------------------------------
 # db functions
-def establish_db_connection(properties):
-    ''' Establishes database connection. '''
-    try:
-        connection = MySQLdb.connect(host=properties[DB_HOST], port=int(properties[DB_PORT]),
-                            user=properties[DB_USER],
-                            passwd=properties[DB_PW],
-                            db=properties[DB_NAME])
-    except MySQLdb.Error, msg:
-        print >> ERROR_FILE, msg
-        sys.exit(2)
-    return connection
 
 def parse_properties(properties_filename):
     ''' Parses the properties file. '''
     properties = {}
-    with open(properties_filename, 'rU') as properties_file:
+    with open(properties_filename, 'r') as properties_file:
         for line in properties_file:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            property = map(str.strip, line.split('='))
+            property = list(map(str.strip, line.split('=')))
             if len(property) != 2:
                 continue
             value = property[1]
             if property[0] in [IGNORED_USERS_LIST, RESTRICTED_USERS_LIST, QUEUE_NAMES_LIST]:
-                value = map(str.strip, value.split(','))
+                value = list(map(str.strip, value.split(',')))
             properties[property[0]] = value
 
     # error check required properties
@@ -111,7 +99,7 @@ def parse_properties(properties_filename):
         IRC_CHAT_SERVER not in properties or len(properties[IRC_CHAT_SERVER]) == 0 or
         IRC_CHAT_SERVER_PORT not in properties or len(properties[IRC_CHAT_SERVER_PORT]) == 0):
         missing = [p for p in [CHANNEL, CLIENT_ID, CLIENT_SECRETS, BOT_USERNAME, IRC_CHAT_SERVER, IRC_CHAT_SERVER_PORT] if p not in properties.keys()]
-        print >> ERROR_FILE, 'Missing one or more required properties, please check property file for the following: %s' % (', '.join(missing))
+        print('Missing one or more required properties, please check property file for the following: %s' % (', '.join(missing)), file = ERROR_FILE)
         sys.exit(2)
 
     # add broadcaster to list of users with mod permsissions
@@ -121,7 +109,7 @@ def parse_properties(properties_filename):
     return properties
 
 def encode_ascii_string(value):
-    return value.encode('ascii', 'ignore')
+    return value.encode('ascii', 'ignore').decode('utf-8')
 
 class TwitchBot(irc.bot.SingleServerIRCBot):
     def __init__(self, properties):
@@ -170,19 +158,20 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
 
         server = properties[IRC_CHAT_SERVER]
-        port = int(properties[IRC_CHAT_SERVER_PORT])
+        #port = int(properties[IRC_CHAT_SERVER_PORT])
+        port = 6667
 
         # Create IRC bot connection
-        print >> OUTPUT_FILE, 'Connecting to %s on port %s...' % (server, port)
+        print('Connecting to %s on port %s...' % (server, port), file = OUTPUT_FILE) 
         irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
 
     def init_auto_shoutout_users(self, auto_shoutout_users_filename):
-        with open (auto_shoutout_users_filename, 'rU') as auto_shoutout_users_file:
+        with open (auto_shoutout_users_filename, 'r') as auto_shoutout_users_file:
             for username in auto_shoutout_users_file.readlines():
                 APPROVED_AUTO_SHOUTOUT_USERS[username.strip()] = False
 
     def init_autobot_responses(self, auto_bot_responses_filename):
-        with open(auto_bot_responses_filename, 'rU') as auto_bot_responses_file:
+        with open(auto_bot_responses_filename, 'r') as auto_bot_responses_file:
             for line in csv.DictReader(auto_bot_responses_file, dialect = 'excel-tab'):
                 message = line['MESSAGE'].lower().strip()
                 bot_responses = AUTOBOT_RESPONSES.get(message, [])
@@ -190,23 +179,23 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 AUTOBOT_RESPONSES[message] = list(set(bot_responses))
 
     def init_custom_shoutout_users(self, custom_shoutouts_filename):
-        with open(custom_shoutouts_filename, 'rU') as custom_shoutouts_file:
+        with open(custom_shoutouts_filename, 'r') as custom_shoutouts_file:
             for record in csv.DictReader(custom_shoutouts_file, dialect='excel-tab'):
                 if not 'TWITCH_USERNAME' in record.keys() or not 'SHOUTOUT_MESSAGE' in record.keys():
-                    print >> ERROR_FILE, 'Custom shoutout file does not contain one or more of required headers:: "TWITCH_USERNAME", "SHOUTOUT_MESSAGE"'
+                    print('Custom shoutout file does not contain one or more of required headers:: "TWITCH_USERNAME", "SHOUTOUT_MESSAGE"', file = ERROR_FILE)
                     sys.exit(2)
                 CUSTOM_USER_SHOUTOUTS[record['TWITCH_USERNAME']] = record['SHOUTOUT_MESSAGE']
 
     def init_flowermons_pokedex(self, flowermons_filename):
-        with open(flowermons_filename, 'rU') as flowermons_file:
+        with open(flowermons_filename, 'r') as flowermons_file:
             for line in flowermons_file.readlines():
                 FLOWERMONS_POKEDEX.add(line.strip().lower())
 
     def load_flowermons_user_data(self, flowermons_user_data_filename):
         if os.path.exists(flowermons_user_data_filename):
-            with open(flowermons_user_data_filename, 'rU') as flowermons_user_data_file:
+            with open(flowermons_user_data_filename, 'r') as flowermons_user_data_file:
                 for line in flowermons_user_data_file.readlines():
-                    data = map(lambda x: x.strip().lower(), line.split('\t'))
+                    data = list(map(lambda x: x.strip().lower(), line.split('\t')))
                     username = data[0]
                     user_pokemon_set = FLOWERMONS_USER_POKEDEX.get(username, set())
                     user_pokemon_set.add(data[1])
@@ -214,11 +203,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def on_welcome(self, c, e):
         ''' Handle welcome. '''
-        print >> OUTPUT_FILE, 'Joining channel: %s' % (self.channel)
+        print('Joining channel: %s' % (self.channel), file = OUTPUT_FILE)
         c.cap('REQ', ':twitch.tv/membership')
         c.cap('REQ', ':twitch.tv/tags')
         c.cap('REQ', ':twitch.tv/commands')
         c.join(self.channel)
+        print('Successfully joined channel, have at it!')
 
     def on_pubmsg(self, c, e):
         ''' Handles message in chat. '''
@@ -228,7 +218,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         # (i.e., manual shoutout with !so <username> command)
         self.auto_streamer_shoutout(e)
 
-        user_message = e.arguments[0].encode('ascii', 'ignore').strip().lower()
+        user_message = e.arguments[0].encode('ascii', 'ignore').strip().lower().decode("utf-8")
         if user_message in AUTOBOT_RESPONSES.keys():
             self.send_auto_bot_response(user_message)
             return
@@ -241,9 +231,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
         # If a chat message starts with an exclamation point, try to run it as a command
         try:
-            parsed_args = map(lambda x: str(x).lower(), encode_ascii_string(user_message).split(' '))
+            parsed_args = user_message.split(' ')
         except UnicodeEncodeError:
-            print >> ERROR_FILE, "[UnicodeEncodeError], Error parsing command."
+            print("[UnicodeEncodeError], Error parsing command.", file = ERROR_FILE)
             return
         ##TODO: REPLACE WITH REGEX
         if not parsed_args[0].startswith('!'):
@@ -251,12 +241,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         cmd = parsed_args[0].replace('!','')
         cmd_args = []
         if len(parsed_args) > 1:
-            cmd_args = map(lambda x: x.replace('@',''), parsed_args[1:])
-        print >> OUTPUT_FILE, 'Received command: %s with args: %s' % (cmd, ', '.join(cmd_args))
+            cmd_args = list(map(lambda x: x.replace('@',''), parsed_args[1:]))
+        print('Received command: %s with args: %s' % (cmd, ', '.join(cmd_args)), file = OUTPUT_FILE)
         try:
             self.do_command(e, cmd_issuer, cmd, cmd_args)
         except Exception as e:
-            print >> OUTPUT_FILE, e
+            print(e, file = OUTPUT_FILE)
         return
 
     def send_auto_bot_response(self, message):
@@ -549,8 +539,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         try:
             c.privmsg(self.channel, message)
         except Exception as e:
-            print >> OUTPUT_FILE, e
-            print >> OUTPUT_FILE, message
+            print(e, file = OUTPUT_FILE)
+            print(message, file = OUTPUT_FILE)
             c.privmsg(self.channel, 'whoops BibleThump @%s broke me snowpoNK' % (cmd_issuer))
         return
 
@@ -710,7 +700,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.update_approved_auto_shoutout_users_list(cmd_args[0])
 
 def usage(parser):
-    print >> OUTPUT_FILE, parser.print_help()
+    print(parser.print_help(), file = OUTPUT_FILE)
     sys.exit(2)
 
 def main():
@@ -731,4 +721,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print >> OUTPUT_FILE, '\nBye!'
+        print('\nBye!', file = OUTPUT_FILE)
