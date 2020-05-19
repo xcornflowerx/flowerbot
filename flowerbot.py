@@ -7,6 +7,7 @@ import optparse
 import csv
 import random
 import operator
+from playsound import playsound
 
 # ---------------------------------------------------------------------------------------------
 # globals
@@ -39,6 +40,7 @@ RESTRICTED_USERS_LIST = 'restricted_users_list'
 RESTRICTED_USERS_COMMAND_COUNT = {}
 QUEUE_NAMES_LIST = 'queue_names_list'
 AUTOBOT_RESPONSES_FILE = 'auto_bot_responses_file'
+SFX_ENABLED = 'sfx.enabled'
 
 # flowermons properties
 FLOWERMONS_ENABLED = 'flowermons.enabled'
@@ -65,6 +67,10 @@ DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For s
 FLOWERMONS_POKEDEX = set()
 FLOWERMONS_USER_POKEDEX = {}
 FLOWERMONS_USER_POKEBALLS = {}
+
+SFX_COMMAND_MAPPINGS = {}
+
+FLOWERBOT_SCRIPT_HOME = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
 
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
@@ -133,6 +139,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.flowermons_subs_only_mode = (properties.get(FLOWERMONS_SUBS_ONLY_MODE, 'false') == 'true')
         self.flowermons_default_pokeball_limit = int(properties.get(FLOWERMONS_DEFAULT_POKEBALL_LIMIT, 3))
         self.flowermons_subscribers_pokeball_limit = int(properties.get(FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT, 10))
+        self.sfx_enabled = (properties.get(SFX_ENABLED, 'false') == 'true')
 
         self.user_shoutout_message_template = DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE
         if CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE in properties and properties[CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE]:
@@ -156,6 +163,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             if self.flowermons_user_data_filename != '':
                 self.load_flowermons_user_data(self.flowermons_user_data_filename)
 
+        if self.sfx_enabled:
+            self.init_sfx_command_mappings()
 
         server = properties[IRC_CHAT_SERVER]
         #port = int(properties[IRC_CHAT_SERVER_PORT])
@@ -164,6 +173,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         # Create IRC bot connection
         print('Connecting to %s on port %s...' % (server, port), file = OUTPUT_FILE) 
         irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
+
+    def init_sfx_command_mappings(self):
+        sfx_mappings_filepath = os.path.join(FLOWERBOT_SCRIPT_HOME, 'resources/data/sfx/sfx_mappings.txt')
+        with open(sfx_mappings_filepath, 'r') as sfx_file_mappings:
+            for line in csv.DictReader(sfx_file_mappings, dialect = 'excel-tab'):
+                SFX_COMMAND_MAPPINGS[line['COMMAND']] = os.path.join('resources/data/sfx', line['SFX_FILENAME'])
 
     def init_auto_shoutout_users(self, auto_shoutout_users_filename):
         with open (auto_shoutout_users_filename, 'r') as auto_shoutout_users_file:
@@ -222,6 +237,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if user_message in AUTOBOT_RESPONSES.keys():
             self.send_auto_bot_response(user_message)
             return
+        print(user_message)
+        if user_message in SFX_COMMAND_MAPPINGS.keys():
+            print('command is a sfx')
+            self.play_sfx(user_message)
+            return
         cmd_issuer = self.get_username(e)
         if cmd_issuer in self.restricted_users_list and user_message.startswith('!'):
             RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] = RESTRICTED_USERS_COMMAND_COUNT.get(cmd_issuer, 0) + 1
@@ -264,6 +284,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, response)
         return
 
+    def play_sfx(self, sfx_cmd):
+        c = self.connection
+        playsound(SFX_COMMAND_MAPPINGS[sfx_cmd])
     # ---------------------------------------------------------------------------------------------
     # FETCH CHANNEL / USER DETAILS
     def get_username(self, e):
