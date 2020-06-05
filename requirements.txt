@@ -1,4 +1,4 @@
-Django==1.11.23
+Django==1.11.29
 Jinja2==2.9.6
 html5lib==0.999999999
 httplib2==0.11.3
