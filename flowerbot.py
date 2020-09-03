@@ -7,6 +7,7 @@ import optparse
 import csv
 import random
 import operator
+import math
 
 # ---------------------------------------------------------------------------------------------
 # globals
@@ -69,8 +70,8 @@ FLOWERMONS_USER_POKEBALLS = {}
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
     'queueinit', 'score', 'streameraddnew', 'deathadd', 'deathreset',
-    'deathinit', 'uptime', 'shoutout', 'songs', 'sr',
-    'flowerdex', 'catch']
+    'deathinit', 'uptime', 'shoutout',
+    'flowerdex', 'catch', 'flowermons']
 
 # ---------------------------------------------------------------------------------------------
 # db functions
@@ -519,13 +520,13 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def calculate_flowerdex_completion(self, cmd_issuer):
         caught_mons = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
-        return (100 * len(caught_mons) / len(FLOWERMONS_POKEDEX))
+        return round((100 * len(caught_mons) / len(FLOWERMONS_POKEDEX)), 1)
 
     def catch_flowermon(self, cmd_issuer, user_is_sub):
         ''' Catches random pokemon for user and stores mon in flowerdex. '''
         c = self.connection
         pokeballs = self.get_users_pokeball_count(cmd_issuer, user_is_sub)
-        if pokeballs == 0:
+        if pokeballs <= 0:
             c.privmsg(self.channel, '@%s, you do not have any flowerballs left! BibleThump' % (cmd_issuer))
             return
         pokemon = random.choice(list(FLOWERMONS_POKEDEX))
@@ -534,8 +535,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         FLOWERMONS_USER_POKEBALLS[cmd_issuer] = pokeballs - 1
 
         message = '@%s caught %s! %s' % (cmd_issuer, pokemon.title(), self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
-        if pokemon == 'jigglypuff' and cmd_issuer != 'vudoo781':
-            message += '... speaking of jigglypuff ... @vudoo781 would like a word with you Kappa'
         try:
             c.privmsg(self.channel, message)
         except Exception as e:
@@ -603,7 +602,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         balls_purchased = num_bits_used / 50
         bonus_balls = num_bits_used / 200;
         current_num_balls = self.get_users_pokeball_count(username, user_is_sub)
-        FLOWERMONS_USER_POKEBALLS[username] = current_num_balls + balls_purchased + bonus_balls
+        FLOWERMONS_USER_POKEBALLS[username] = math.ceil( current_num_balls + balls_purchased + bonus_balls)
         c = self.connection
         c.privmsg(self.channel, '%s now has %s flowerballs!' % (username, FLOWERMONS_USER_POKEBALLS[username]))
         return
@@ -641,7 +640,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if cmd == "game":
             game = self.get_last_game_played(self.channel_id)
             c.privmsg(self.channel, self.channel_display_name + ' is currently playing ' + game)
-        # Poll the API the get the current status of the stream
         elif cmd == "title":
             title = self.get_channel_title(self.channel_id)
             c.privmsg(self.channel, self.channel_display_name + ' channel title is currently ' + title)
@@ -665,6 +663,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.print_available_queues()
             elif cmd == 'position':
                 self.print_user_position_in_queue(cmd_issuer)
+        elif cmd == 'flowermons':
+            c.privmsg(self.channel, 'The Flowermons help doc can be found here: https://github.com/xcornflowerx/flowerbot/blob/master/docs/Flowermons.md')
         elif self.flowermons_enabled and cmd in ['flowerdex', 'catch', 'addballs', 'leaders']:
             if cmd == 'addballs' and cmd_issuer == self.channel_display_name:
                 username = cmd_args[0]
