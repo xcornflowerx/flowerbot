@@ -49,14 +49,6 @@ FLOWERMONS_SUBS_ONLY_MODE = 'flowermons.subs_only_mode'
 FLOWERMONS_DEFAULT_POKEBALL_LIMIT = 'flowermons.default_pokeball_limit'
 FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT = 'flowermons.subs_pokeball_limit'
 
-
-# db properties
-DB_HOST = 'db.host'
-DB_NAME = 'db.db_name'
-DB_USER = 'db.user'
-DB_PW = 'db.password'
-DB_PORT = 'db.port'
-
 MSG_USERNAME_REPLACE_STRING = '${username}'
 MSG_LAST_GAME_PLAYED_REPLACE_STRING = '${lastgameplayed}'
 MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
@@ -71,7 +63,7 @@ FLOWERMONS_USER_POKEBALLS = {}
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
     'queueinit', 'score', 'streameraddnew', 'deathadd', 'deathreset',
     'deathinit', 'uptime', 'shoutout',
-    'flowerdex', 'catch', 'flowermons']
+    'flowerdex', 'catch', 'flowermons', 'addballs']
 
 # ---------------------------------------------------------------------------------------------
 # db functions
@@ -258,10 +250,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         '''
         c = self.connection
         response = response = random.choice(AUTOBOT_RESPONSES[message])
-        send_message = True
-        if not message.startswith('!'):
-            send_message = random.choice([True, False, False])
-        if response and send_message:
+        if message.startswith('!') or random.choice([True, False, False]):
             c.privmsg(self.channel, response)
         return
 
@@ -347,9 +336,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 message = "%s streams but they are keeping their last game a played a secret Kappa" % (user)
             else:
                 message = "%s is not a streamer BibleThump" % (user)
+            USERS_CHECKED.add(user)
         else:
             message = self.format_streamer_shoutout_message(user, game)
-            USERS_CHECKED.add(user)
         c.privmsg(self.channel, message)
         return
 
@@ -661,11 +650,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.print_current_score()
             elif cmd in ['join', 'list', 'queues']:
                 self.print_available_queues()
-            elif cmd == 'position':
+            elif cmd in ['position', 'pos']:
                 self.print_user_position_in_queue(cmd_issuer)
         elif cmd == 'flowermons':
             c.privmsg(self.channel, 'The Flowermons help doc can be found here: https://github.com/xcornflowerx/flowerbot/blob/master/docs/Flowermons.md')
-        elif self.flowermons_enabled and cmd in ['flowerdex', 'catch', 'addballs', 'leaders']:
+            c.privmsg(self.channel, 'Flowermons commands list: !catch !flowerdex !leaders')
+        elif cmd in ['flowerdex', 'catch', 'addballs', 'leaders'] and self.flowermons_enabled:
             if cmd == 'addballs' and cmd_issuer == self.channel_display_name:
                 username = cmd_args[0]
                 purchase_type = cmd_args[1]
@@ -681,23 +671,22 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     self.print_flowerdex_leaders_message()
                 elif cmd == 'catch':
                     self.catch_flowermon(cmd_issuer, user_is_sub)
-        elif cmd == 'queueinit' and cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
-            self.init_new_queue_list(cmd_args)
-        elif user_has_mod_privileges:
-            if cmd == 'deathadd':
-                self.death_count += 1
-                c.privmsg(self.channel, "%s's current death count is now %s ;___;" % (self.channel_display_name, self.death_count))
-            elif cmd == 'deathreset':
-                self.death_count = 0
-                c.privmsg(self.channel, "%s reset their current death count :P" % (self.channel_display_name))
-            elif cmd == 'deathinit':
-                self.death_count = int(cmd_args[0])
-                c.privmsg(self.channel, "%s initialized their current death count to %s" % (self.channel_display_name, self.death_count))
-            elif cmd == "so" and len(cmd_args) > 0:
-                self.streamer_shoutout_message(cmd_args[0])
-        elif cmd_issuer == self.channel_display_name:
-            if cmd == "streameraddnew":
-                self.update_approved_auto_shoutout_users_list(cmd_args[0])
+        elif cmd == 'queueinit':
+        	if cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
+	            self.init_new_queue_list(cmd_args)
+        elif cmd == 'deathadd' and user_has_mod_privileges:
+            self.death_count += 1
+            c.privmsg(self.channel, "%s's current death count is now %s BibleThump" % (self.channel_display_name, self.death_count))
+        elif cmd == 'deathreset' and user_has_mod_privileges:
+            self.death_count = 0
+            c.privmsg(self.channel, "%s reset their current death count" % (self.channel_display_name))
+        elif cmd == 'deathinit' and user_has_mod_privileges:
+            self.death_count = int(cmd_args[0])
+            c.privmsg(self.channel, "%s initialized their current death count to %s" % (self.channel_display_name, self.death_count))
+        elif cmd == "so" and len(cmd_args) > 0 and user_has_mod_privileges:
+            self.streamer_shoutout_message(cmd_args[0])
+        elif cmd == "streameraddnew" and cmd_issuer == self.channel_display_name:
+            self.update_approved_auto_shoutout_users_list(cmd_args[0])
 
 def usage(parser):
     print(parser.print_help(), file = OUTPUT_FILE)
