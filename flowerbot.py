@@ -553,11 +553,13 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             return
         pokemon = random.choice(list(FLOWERMONS_POKEDEX))
         shiny_status = self.determine_shiny_status(user_is_sub)
-        self.store_caught_pokemon(cmd_issuer, pokemon)
+        self.store_caught_pokemon(cmd_issuer, pokemon, shiny_status)
 
         FLOWERMONS_USER_POKEBALLS[cmd_issuer] = pokeballs - 1
-
-        message = '@%s caught %s! %s' % (cmd_issuer, pokemon.title(), self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
+        shiny_message = ''
+        if shiny_status:
+            shiny_message = ' and it was * SHINY * !!!'
+        message = '@%s caught %s%s! %s' % (cmd_issuer, pokemon.title(), shiny_message, self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
         try:
             c.privmsg(self.channel, message)
         except Exception as e:
@@ -585,10 +587,10 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         ''' Updates Flowermons user data file. '''
         with open(self.flowermons_user_data_filename, 'w') as flowermons_user_data_file:
             for user, user_pokemon_stats in FLOWERMONS_USER_POKEDEX.items():
-                caught_pokemon = user_pokemon_stats['CAUGHT']
-                shiny_pokemon = user_pokemon_stats['SHINY']
+                user_pokemon_set = user_pokemon_stats['CAUGHT']
+                user_pokemon_shiny_set = user_pokemon_stats['SHINY']
                 for pokemon in user_pokemon_set:
-                    shiny_status = ('SHINY' if pokemon in shiny_pokemon else '')
+                    shiny_status = ('SHINY' if pokemon in user_pokemon_shiny_set else '')
                     flowermons_user_data_file.write('%s\t%s\t%s\n' % (user, pokemon, shiny_status))
 
     def get_users_pokeball_count(self, cmd_issuer, user_is_sub):
