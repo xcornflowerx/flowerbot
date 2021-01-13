@@ -5,4 +5,4 @@ resources/data/custom_shoutout_messages.txt
 .DS_Store
 *.pyc
 *.bak
-resources/data/mons/caughtmons.txt
+resources/data/mons/caughtmons*.txt

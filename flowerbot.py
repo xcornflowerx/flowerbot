@@ -49,14 +49,6 @@ FLOWERMONS_SUBS_ONLY_MODE = 'flowermons.subs_only_mode'
 FLOWERMONS_DEFAULT_POKEBALL_LIMIT = 'flowermons.default_pokeball_limit'
 FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT = 'flowermons.subs_pokeball_limit'
 
-
-# db properties
-DB_HOST = 'db.host'
-DB_NAME = 'db.db_name'
-DB_USER = 'db.user'
-DB_PW = 'db.password'
-DB_PORT = 'db.port'
-
 MSG_USERNAME_REPLACE_STRING = '${username}'
 MSG_LAST_GAME_PLAYED_REPLACE_STRING = '${lastgameplayed}'
 MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
@@ -71,7 +63,7 @@ FLOWERMONS_USER_POKEBALLS = {}
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
     'queueinit', 'score', 'streameraddnew', 'deathadd', 'deathreset',
     'deathinit', 'uptime', 'shoutout',
-    'flowerdex', 'catch', 'flowermons']
+    'flowerdex', 'catch', 'flowermons', 'addballs']
 
 # ---------------------------------------------------------------------------------------------
 # db functions
@@ -163,7 +155,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         port = 6667
 
         # Create IRC bot connection
-        print('Connecting to %s on port %s...' % (server, port), file = OUTPUT_FILE) 
+        print('Connecting to %s on port %s...' % (server, port), file = OUTPUT_FILE)
         irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
 
     def init_auto_shoutout_users(self, auto_shoutout_users_filename):
@@ -198,9 +190,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 for line in flowermons_user_data_file.readlines():
                     data = list(map(lambda x: x.strip().lower(), line.split('\t')))
                     username = data[0]
-                    user_pokemon_set = FLOWERMONS_USER_POKEDEX.get(username, set())
+                    user_pokemon_stats = FLOWERMONS_USER_POKEDEX.get(username, {})
+
+                    user_pokemon_set = user_pokemon_stats.get('CAUGHT', set())
+                    user_pokemon_shiny_set = user_pokemon_stats.get('SHINY', set())
+
                     user_pokemon_set.add(data[1])
-                    FLOWERMONS_USER_POKEDEX[username] = user_pokemon_set
+                    if 'SHINY' in line:
+                        user_pokemon_shiny_set.add(data[1])
+                    user_pokemon_stats['CAUGHT'] = user_pokemon_set
+                    user_pokemon_stats['SHINY'] = user_pokemon_shiny_set
+
+                    FLOWERMONS_USER_POKEDEX[username] = user_pokemon_stats
 
     def on_welcome(self, c, e):
         ''' Handle welcome. '''
@@ -258,10 +259,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         '''
         c = self.connection
         response = response = random.choice(AUTOBOT_RESPONSES[message])
-        send_message = True
-        if not message.startswith('!'):
-            send_message = random.choice([True, False, False])
-        if response and send_message:
+        if message.startswith('!') or random.choice([True, False, False]):
             c.privmsg(self.channel, response)
         return
 
@@ -347,9 +345,9 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 message = "%s streams but they are keeping their last game a played a secret Kappa" % (user)
             else:
                 message = "%s is not a streamer BibleThump" % (user)
+            USERS_CHECKED.add(user)
         else:
             message = self.format_streamer_shoutout_message(user, game)
-            USERS_CHECKED.add(user)
         c.privmsg(self.channel, message)
         return
 
@@ -505,10 +503,33 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
     # ---------------------------------------------------------------------------------------------
     # FLOWERMONS
 
+    def determine_shiny_status(self, user_is_sub):
+        '''
+            Determines the shiny status of a caught pokemon assuming full odds (Masuda) is 1/4096.
+            Subscribers have a 1/512 chance of catching a shiny.
+        '''
+        shiny_index = random.randint(0, 4095) # CoUnTiNg StArTs At ZeRo
+        if user_is_sub:
+            shiny_index_lower = (0 if ((shiny_index - 256) < 0) else (shiny_index - 256))
+            shiny_index_upper = (4095 if ((shiny_index + 256) > 4095) else (shiny_index + 256))
+            user_index = random.randint(shiny_index_lower, shiny_index_upper)
+        else:
+            user_index = random.randint(0, 4095)
+        return (user_index == shiny_index)
+
     def format_flowerdex_check_message(self, cmd_issuer, user_is_sub):
-        caught_mons = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
-        if len(caught_mons) > 0:
-            message = '@%s your FlowerDex is %s%% complete and you have %s Flowerballs left!' % (cmd_issuer, self.calculate_flowerdex_completion(cmd_issuer), self.get_users_pokeball_count(cmd_issuer, user_is_sub))
+        user_pokemon_stats = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, {})
+        user_pokemon_set = user_pokemon_stats.get('CAUGHT', set())
+        user_pokemon_shiny_set = user_pokemon_stats.get('SHINY', set())
+
+        if len(user_pokemon_set) > 0:
+            message = '@%s your FlowerDex is %s%% complete' % (cmd_issuer, self.calculate_flowerdex_completion(cmd_issuer))
+            if len(user_pokemon_shiny_set) > 0:
+                if len(user_pokemon_shiny_set) == 1:
+                    message = message + ' (%s shiny caught!) ' % (len(user_pokemon_shiny_set))
+                else:
+                    message = message + ' (%s shinies caught!) ' % (len(user_pokemon_shiny_set))
+            message = message + ' and you have %s Flowerballs left!' % (self.get_users_pokeball_count(cmd_issuer, user_is_sub))
         else:
             message = '@%s you have not caught any pokemon yet :(' % (cmd_issuer)
         return message
@@ -519,7 +540,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         return
 
     def calculate_flowerdex_completion(self, cmd_issuer):
-        caught_mons = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
+        user_pokemon_stats = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, {})
+        caught_mons = user_pokemon_stats.get('CAUGHT', set())
         return round((100 * len(caught_mons) / len(FLOWERMONS_POKEDEX)), 1)
 
     def catch_flowermon(self, cmd_issuer, user_is_sub):
@@ -530,11 +552,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, '@%s, you do not have any flowerballs left! BibleThump' % (cmd_issuer))
             return
         pokemon = random.choice(list(FLOWERMONS_POKEDEX))
-        self.store_caught_pokemon(cmd_issuer, pokemon)
+        shiny_status = self.determine_shiny_status(user_is_sub)
+        self.store_caught_pokemon(cmd_issuer, pokemon, shiny_status)
 
         FLOWERMONS_USER_POKEBALLS[cmd_issuer] = pokeballs - 1
-
-        message = '@%s caught %s! %s' % (cmd_issuer, pokemon.title(), self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
+        shiny_message = ''
+        if shiny_status:
+            shiny_message = ' and it was * SHINY * !!!'
+        message = '@%s caught %s%s! %s' % (cmd_issuer, pokemon.title(), shiny_message, self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
         try:
             c.privmsg(self.channel, message)
         except Exception as e:
@@ -543,19 +568,30 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, 'whoops BibleThump @%s broke me snowpoNK' % (cmd_issuer))
         return
 
-    def store_caught_pokemon(self, cmd_issuer, pokemon):
+    def store_caught_pokemon(self, cmd_issuer, pokemon, shiny_status):
         ''' Stores pokemon in data file for user. '''
-        user_pokemon_set = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, set())
+        user_pokemon_stats = FLOWERMONS_USER_POKEDEX.get(cmd_issuer, {})
+        user_pokemon_set = user_pokemon_stats.get('CAUGHT', set())
+        user_pokemon_shiny_set = user_pokemon_stats.get('SHINY', set())
+
         user_pokemon_set.add(pokemon)
-        FLOWERMONS_USER_POKEDEX[cmd_issuer] = user_pokemon_set
+        if shiny_status:
+            user_pokemon_shiny_set.add(pokemon)
+
+        user_pokemon_stats['CAUGHT'] = user_pokemon_set
+        user_pokemon_stats['SHINY'] = user_pokemon_shiny_set
+        FLOWERMONS_USER_POKEDEX[cmd_issuer] = user_pokemon_stats
         self.update_flowermons_user_pokedex_data_file()
 
     def update_flowermons_user_pokedex_data_file(self):
         ''' Updates Flowermons user data file. '''
         with open(self.flowermons_user_data_filename, 'w') as flowermons_user_data_file:
-            for user, user_pokemon_set in FLOWERMONS_USER_POKEDEX.items():
+            for user, user_pokemon_stats in FLOWERMONS_USER_POKEDEX.items():
+                user_pokemon_set = user_pokemon_stats['CAUGHT']
+                user_pokemon_shiny_set = user_pokemon_stats['SHINY']
                 for pokemon in user_pokemon_set:
-                    flowermons_user_data_file.write('%s\t%s\n' % (user, pokemon))
+                    shiny_status = ('SHINY' if pokemon in user_pokemon_shiny_set else '')
+                    flowermons_user_data_file.write('%s\t%s\t%s\n' % (user, pokemon, shiny_status))
 
     def get_users_pokeball_count(self, cmd_issuer, user_is_sub):
         ''' Returns number of pokeballs user has left. '''
@@ -661,11 +697,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 self.print_current_score()
             elif cmd in ['join', 'list', 'queues']:
                 self.print_available_queues()
-            elif cmd == 'position':
+            elif cmd in ['position', 'pos']:
                 self.print_user_position_in_queue(cmd_issuer)
         elif cmd == 'flowermons':
             c.privmsg(self.channel, 'The Flowermons help doc can be found here: https://github.com/xcornflowerx/flowerbot/blob/master/docs/Flowermons.md')
-        elif self.flowermons_enabled and cmd in ['flowerdex', 'catch', 'addballs', 'leaders']:
+            c.privmsg(self.channel, 'Flowermons commands list: !catch !flowerdex !leaders')
+        elif cmd in ['flowerdex', 'catch', 'addballs', 'leaders'] and self.flowermons_enabled:
             if cmd == 'addballs' and cmd_issuer == self.channel_display_name:
                 username = cmd_args[0]
                 purchase_type = cmd_args[1]
@@ -681,23 +718,22 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     self.print_flowerdex_leaders_message()
                 elif cmd == 'catch':
                     self.catch_flowermon(cmd_issuer, user_is_sub)
-        elif cmd == 'queueinit' and cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
-            self.init_new_queue_list(cmd_args)
-        elif user_has_mod_privileges:
-            if cmd == 'deathadd':
-                self.death_count += 1
-                c.privmsg(self.channel, "%s's current death count is now %s ;___;" % (self.channel_display_name, self.death_count))
-            elif cmd == 'deathreset':
-                self.death_count = 0
-                c.privmsg(self.channel, "%s reset their current death count :P" % (self.channel_display_name))
-            elif cmd == 'deathinit':
-                self.death_count = int(cmd_args[0])
-                c.privmsg(self.channel, "%s initialized their current death count to %s" % (self.channel_display_name, self.death_count))
-            elif cmd == "so" and len(cmd_args) > 0:
-                self.streamer_shoutout_message(cmd_args[0])
-        elif cmd_issuer == self.channel_display_name:
-            if cmd == "streameraddnew":
-                self.update_approved_auto_shoutout_users_list(cmd_args[0])
+        elif cmd == 'queueinit':
+            if cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
+                self.init_new_queue_list(cmd_args)
+        elif cmd == 'deathadd' and user_has_mod_privileges:
+            self.death_count += 1
+            c.privmsg(self.channel, "%s's current death count is now %s BibleThump" % (self.channel_display_name, self.death_count))
+        elif cmd == 'deathreset' and user_has_mod_privileges:
+            self.death_count = 0
+            c.privmsg(self.channel, "%s reset their current death count" % (self.channel_display_name))
+        elif cmd == 'deathinit' and user_has_mod_privileges:
+            self.death_count = int(cmd_args[0])
+            c.privmsg(self.channel, "%s initialized their current death count to %s" % (self.channel_display_name, self.death_count))
+        elif cmd == "so" and len(cmd_args) > 0 and user_has_mod_privileges:
+            self.streamer_shoutout_message(cmd_args[0])
+        elif cmd == "streameraddnew" and cmd_issuer == self.channel_display_name:
+            self.update_approved_auto_shoutout_users_list(cmd_args[0])
 
 def usage(parser):
     print(parser.print_help(), file = OUTPUT_FILE)
