@@ -8,6 +8,8 @@ import csv
 import random
 import operator
 import math
+from playsound import playsound
+from datetime import datetime, date
 
 # ---------------------------------------------------------------------------------------------
 # globals
@@ -23,6 +25,11 @@ USERS_CHECKED = set()
 USER_QUEUE = {}
 QUEUE_SCORE = {}
 
+# SYSTEM GLOBALS
+CURRENT_DIR = os.getcwd()
+RESOURCES_DIR = os.path.join(CURRENT_DIR, 'resources')
+DATA_DIRECTORY = os.path.join(RESOURCES_DIR, 'data')
+FLOWERMONS_DIRECTORY = os.path.join(DATA_DIRECTORY, 'mons')
 # ---------------------------------------------------------------------------------------------
 # required properties
 BOT_USERNAME = 'bot.username'
@@ -36,10 +43,9 @@ AUTO_SHOUTOUT_USERS_FILE = 'auto_shoutout_users_file'
 CUSTOM_SHOUTOUTS_FILE = 'custom_shoutouts_file'
 CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE = 'custom.user_shoutout_message'
 IGNORED_USERS_LIST = 'ignored_users_list'
-RESTRICTED_USERS_LIST = 'restricted_users_list'
-RESTRICTED_USERS_COMMAND_COUNT = {}
 QUEUE_NAMES_LIST = 'queue_names_list'
 AUTOBOT_RESPONSES_FILE = 'auto_bot_responses_file'
+SFX_DIRECTORY = 'sfx.directory'
 
 # flowermons properties
 FLOWERMONS_ENABLED = 'flowermons.enabled'
@@ -58,6 +64,7 @@ DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For s
 FLOWERMONS_POKEDEX = set()
 FLOWERMONS_USER_POKEDEX = {}
 FLOWERMONS_USER_POKEBALLS = {}
+FLOWERMONS_SUB_SHINY_DENOM = 256
 
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
@@ -65,13 +72,20 @@ VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
     'deathinit', 'uptime', 'shoutout',
     'flowerdex', 'catch', 'flowermons', 'addballs']
 
+## TODO: move mappings to data file :)
+SFX_MAPPINGS = {
+    'shiny' : 'shiny_sfx.mp3',
+    'rafakp' : 'emf_sample_audio_trimmed.mp3',
+    'sin_elite': 'twilightzone_cut.mp3'
+}
+
 # ---------------------------------------------------------------------------------------------
 # db functions
 
 def parse_properties(properties_filename):
     ''' Parses the properties file. '''
     properties = {}
-    with open(properties_filename, 'r') as properties_file:
+    with open(properties_filename, 'r', encoding = "utf8") as properties_file:
         for line in properties_file:
             line = line.strip()
             if not line or line.startswith('#'):
@@ -80,8 +94,6 @@ def parse_properties(properties_filename):
             if len(property) != 2:
                 continue
             value = property[1]
-            if property[0] in [IGNORED_USERS_LIST, RESTRICTED_USERS_LIST, QUEUE_NAMES_LIST]:
-                value = list(map(str.strip, value.split(',')))
             properties[property[0]] = value
 
     # error check required properties
@@ -111,18 +123,19 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.bot_username = properties[BOT_USERNAME]
         self.client_id = properties[CLIENT_ID]
         self.token = properties[CLIENT_SECRETS]
-        self.auto_shoutout_users_file = properties.get(AUTO_SHOUTOUT_USERS_FILE, '')
-        self.auto_bot_responses_file = properties.get(AUTOBOT_RESPONSES_FILE, '')
-        self.custom_shoutouts_file = properties.get(CUSTOM_SHOUTOUTS_FILE, '')
+        self.auto_shoutout_users_file = os.path.join(DATA_DIRECTORY, properties.get(AUTO_SHOUTOUT_USERS_FILE, ''))
+        self.auto_bot_responses_file = os.path.join(DATA_DIRECTORY, properties.get(AUTOBOT_RESPONSES_FILE, ''))
+        self.custom_shoutouts_file = os.path.join(DATA_DIRECTORY, properties.get(CUSTOM_SHOUTOUTS_FILE, ''))
+        self.sfx_directory = os.path.join(RESOURCES_DIR, 'sfx')
+
         self.death_count = 0
         self.channel_id = self.get_channel_id(properties[CHANNEL])
         self.trusted_users_list = properties[CHANNEL_TRUSTED_USERS_LIST]
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
-        self.restricted_users_list = properties.get(RESTRICTED_USERS_LIST, [])
         self.queue_names_list = properties.get(QUEUE_NAMES_LIST, [])
         self.flowermons_enabled = (properties.get(FLOWERMONS_ENABLED, 'false') == 'true')
-        self.flowermons_filename = properties.get(FLOWERMONS_FILENAME, '')
-        self.flowermons_user_data_filename = properties.get(FLOWERMONS_USER_DATA_FILENAME, '')
+        self.flowermons_filename = os.path.join(FLOWERMONS_DIRECTORY, properties.get(FLOWERMONS_FILENAME, ''))
+        self.flowermons_user_data_filename = os.path.join(FLOWERMONS_DIRECTORY, properties.get(FLOWERMONS_USER_DATA_FILENAME, '')) 
         self.flowermons_subs_only_mode = (properties.get(FLOWERMONS_SUBS_ONLY_MODE, 'false') == 'true')
         self.flowermons_default_pokeball_limit = int(properties.get(FLOWERMONS_DEFAULT_POKEBALL_LIMIT, 3))
         self.flowermons_subscribers_pokeball_limit = int(properties.get(FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT, 10))
@@ -158,21 +171,59 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         print('Connecting to %s on port %s...' % (server, port), file = OUTPUT_FILE)
         irc.bot.SingleServerIRCBot.__init__(self, [(server, port, 'oauth:'+ self.token)], self.channel_display_name, self.bot_username)
 
+    def print_message_to_chat(self, message):
+        c = self.connection
+        c.privmsg(self.channel, message)
+        return
+
     def init_auto_shoutout_users(self, auto_shoutout_users_filename):
-        with open (auto_shoutout_users_filename, 'r') as auto_shoutout_users_file:
+        with open (auto_shoutout_users_filename, 'r', encoding = "utf8") as auto_shoutout_users_file:
             for username in auto_shoutout_users_file.readlines():
                 APPROVED_AUTO_SHOUTOUT_USERS[username.strip()] = False
 
     def init_autobot_responses(self, auto_bot_responses_filename):
-        with open(auto_bot_responses_filename, 'r') as auto_bot_responses_file:
+        with open(auto_bot_responses_filename, 'r', encoding = "utf8") as auto_bot_responses_file:
             for line in csv.DictReader(auto_bot_responses_file, dialect = 'excel-tab'):
                 message = line['MESSAGE'].lower().strip()
                 bot_responses = AUTOBOT_RESPONSES.get(message, [])
                 bot_responses.append(line['RESPONSE'])
                 AUTOBOT_RESPONSES[message] = list(set(bot_responses))
 
+#### TODO: Fix how commands are updated 
+    # def update_autobot_responses_file(self):
+    #     with open(self.auto_bot_responses_filename, 'w', encoding = 'utf8') as auto_bot_responses_file:
+    #         file_header = ['MESSAGE', 'RESPONSE']
+    #         auto_bot_responses_file.write('\t'.join(file_header))
+    #         auto_bot_responses_file.write('\n')
+    #         for cmd,message_list in AUTOBOT_RESPONSES.items():
+    #             for message in message_list:
+    #                 auto_bot_responses_file.write(cmd)
+    #                 auto_bot_responses_file.write('\t')
+    #                 auto_bot_responses_file.write(message)
+    #                 auto_bot_responses_file.write('\n')
+
+    # def edit_existing_command(self, cmd, response):
+    #     AUTOBOT_RESPONSES[cmd.lower()] = response
+    #     self.update_autobot_responses_file()
+
+    # def add_new_command(self, cmd, response):
+    #     cmd = cmd.lower()
+    #     if cmd in AUTOBOT_RESPONSES.keys():
+    #         message = 'Command %s already exists - use !editcmd to edit an existing command' % cmd
+    #         self.print_message_to_chat(message)
+    #     else:
+    #         AUTOBOT_RESPONSES[cmd] = response
+    #         self.update_autobot_responses_file()
+
+    # def add_new_alias_keyword(self, cmd, response):
+    #     cmd = cmd.lower()
+    #     existing_responses = AUTOBOT_RESPONSES.get(cmd, [])
+    #     existing_responses.append(response)
+    #     AUTOBOT_RESPONSES[cmd] = existing_responses
+    #     self.update_autobot_responses_file()
+
     def init_custom_shoutout_users(self, custom_shoutouts_filename):
-        with open(custom_shoutouts_filename, 'r') as custom_shoutouts_file:
+        with open(custom_shoutouts_filename, 'r', encoding = "utf8") as custom_shoutouts_file:
             for record in csv.DictReader(custom_shoutouts_file, dialect='excel-tab'):
                 if not 'TWITCH_USERNAME' in record.keys() or not 'SHOUTOUT_MESSAGE' in record.keys():
                     print('Custom shoutout file does not contain one or more of required headers:: "TWITCH_USERNAME", "SHOUTOUT_MESSAGE"', file = ERROR_FILE)
@@ -180,13 +231,13 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                 CUSTOM_USER_SHOUTOUTS[record['TWITCH_USERNAME']] = record['SHOUTOUT_MESSAGE']
 
     def init_flowermons_pokedex(self, flowermons_filename):
-        with open(flowermons_filename, 'r') as flowermons_file:
+        with open(flowermons_filename, 'r', encoding = "utf8") as flowermons_file:
             for line in flowermons_file.readlines():
                 FLOWERMONS_POKEDEX.add(line.strip().lower())
 
     def load_flowermons_user_data(self, flowermons_user_data_filename):
         if os.path.exists(flowermons_user_data_filename):
-            with open(flowermons_user_data_filename, 'r') as flowermons_user_data_file:
+            with open(flowermons_user_data_filename, 'r', encoding = "utf8") as flowermons_user_data_file:
                 for line in flowermons_user_data_file.readlines():
                     data = list(map(lambda x: x.strip().lower(), line.split('\t')))
                     username = data[0]
@@ -219,17 +270,11 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         # and streamer has not already gotten a shout out
         # (i.e., manual shoutout with !so <username> command)
         self.auto_streamer_shoutout(e)
-
         user_message = e.arguments[0].encode('ascii', 'ignore').strip().lower().decode("utf-8")
         if user_message in AUTOBOT_RESPONSES.keys():
             self.send_auto_bot_response(user_message)
             return
         cmd_issuer = self.get_username(e)
-        if cmd_issuer in self.restricted_users_list and user_message.startswith('!'):
-            RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] = RESTRICTED_USERS_COMMAND_COUNT.get(cmd_issuer, 0) + 1
-            if RESTRICTED_USERS_COMMAND_COUNT[cmd_issuer] > 5:
-                c.privmsg(self.channel, '%s your use of commands has been suspended temporarily for overusage Kappa' % (cmd_issuer))
-                return
 
         # If a chat message starts with an exclamation point, try to run it as a command
         try:
@@ -277,13 +322,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def user_is_sub(self, e):
         ''' Returns whether user is a subscriber. '''
-        sub_founder_status = False
         for d in e.tags:
             if d['key'] in ['subscriber', 'founder']:
                 if d['value'][0] == '1':
-                    sub_founder_status = True
-                    break
-        return sub_founder_status
+                    return True
+            elif d['key'] in ['badges', 'badge-info']:
+                if 'founder' in d['value']:
+                    return True
+        return False
 
     def get_channel_id(self, twitch_channel):
         ''' Returns the twitch channel id. '''
@@ -302,6 +348,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         except:
             game = 'None'
         return game
+
+    def is_spawnpoint_team_member(self, twitch_channel_id):
+        ''' Returns which stream teams a channel belongs to. '''
+        url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id + '/teams'
+        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+        r = requests.get(url, headers=headers).json()
+        if 'teams' in r:
+            for data in r['teams']:
+                if data.get('name', '').lower() == 'spawnpoint':
+                    return True
+        return False
+
 
     def get_channel_title(self, e):
         ''' Returns channel title. '''
@@ -340,15 +398,15 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             return
         cid = self.get_channel_id(user)
         game = self.get_last_game_played(cid)
-        if str(game) == 'None' and not user in CUSTOM_USER_SHOUTOUTS.keys():
-            if user in APPROVED_AUTO_SHOUTOUT_USERS.keys():
-                message = "%s streams but they are keeping their last game a played a secret Kappa" % (user)
-            else:
-                message = "%s is not a streamer BibleThump" % (user)
-            USERS_CHECKED.add(user)
-        else:
+        USERS_CHECKED.add(user)
+        if str(game) != "None":
             message = self.format_streamer_shoutout_message(user, game)
+            if self.is_spawnpoint_team_member(cid):
+                message = 'Is that a Spawn Point team member I see?! xcornfPOG ' + message
         c.privmsg(self.channel, message)
+        if user in SFX_MAPPINGS.keys():
+            sfx_filename = os.path.join(self.sfx_directory, SFX_MAPPINGS[user])
+            playsound(sfx_filename)
         return
 
     def auto_streamer_shoutout(self, e):
@@ -510,8 +568,8 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         '''
         shiny_index = random.randint(0, 4095) # CoUnTiNg StArTs At ZeRo
         if user_is_sub:
-            shiny_index_lower = (0 if ((shiny_index - 256) < 0) else (shiny_index - 256))
-            shiny_index_upper = (4095 if ((shiny_index + 256) > 4095) else (shiny_index + 256))
+            shiny_index_lower = (0 if ((shiny_index - FLOWERMONS_SUB_SHINY_DENOM) < 0) else (shiny_index - FLOWERMONS_SUB_SHINY_DENOM))
+            shiny_index_upper = (4095 if ((shiny_index + FLOWERMONS_SUB_SHINY_DENOM) > 4095) else (shiny_index + FLOWERMONS_SUB_SHINY_DENOM))
             user_index = random.randint(shiny_index_lower, shiny_index_upper)
         else:
             user_index = random.randint(0, 4095)
@@ -561,6 +619,13 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             shiny_message = ' and it was * SHINY * !!!'
         message = '@%s caught %s%s! %s' % (cmd_issuer, pokemon.title(), shiny_message, self.format_flowerdex_check_message(cmd_issuer, user_is_sub))
         try:
+            try:
+                if shiny_status:
+                    shiny_filename = os.path.join(self.sfx_directory, SFX_MAPPINGS['shiny'])
+                    playsound(shiny_filename)
+            except Exception as e:
+                print(e, file = OUTPUT_FILE)
+                print('Failed to play shiny sound', file = OUTPUT_FILE)
             c.privmsg(self.channel, message)
         except Exception as e:
             print(e, file = OUTPUT_FILE)
@@ -664,6 +729,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             c.privmsg(self.channel, '"%s" is an invalid way to add balls for a user' % (purchase_type))
         return
 
+    def splat3_reveal_day_count(self):
+        reveal_date = datetime.strptime('2/17/2021', '%m/%d/%Y')
+        today = datetime.strptime(date.today().strftime('%m/%d/%Y'), '%m/%d/%Y')
+        days_since = today - reveal_date
+        c = self.connection
+        c.privmsg(self.channel, "It's been %s days since Nintendo revealed Splatoon 3 xcornfPOG" % days_since.days)
+        return
+
     # ---------------------------------------------------------------------------------------------
     # BOT MAIN
     def do_command(self, e, cmd_issuer, cmd, cmd_args):
@@ -673,9 +746,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             user_has_mod_privileges = True
         user_is_sub = self.user_is_sub(e)
 
-        if cmd == "game":
-            game = self.get_last_game_played(self.channel_id)
-            c.privmsg(self.channel, self.channel_display_name + ' is currently playing ' + game)
+        #### TODO: Pending fix for how new commands or existing commands are added or updated
+        # if cmd in ['addcmd', 'editcmd', 'addalias'] and user_has_mod_privileges:
+        #     new_cmd = cmd_args[0]
+        #     new_cmd_response = ' '.join(cmd_args[1:])
+        #     if cmd == 'addcmd':
+        #         self.add_new_command(new_cmd, new_cmd_response)
+        #     elif cmd == 'editcmd':
+        #         self.edit_existing_command(new_cmd, new_cmd_response)
+        #     elif cmd == 'addalias':
+        #         self.add_new_alias_keyword(new_cmd, new_cmd_response)
+        if cmd == 'splat3':
+            self.splat3_reveal_day_count()
         elif cmd == "title":
             title = self.get_channel_title(self.channel_id)
             c.privmsg(self.channel, self.channel_display_name + ' channel title is currently ' + title)

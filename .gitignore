@@ -6,3 +6,4 @@ resources/data/custom_shoutout_messages.txt
 *.pyc
 *.bak
 resources/data/mons/caughtmons*.txt
+resources/sfx
