@@ -34,6 +34,7 @@ FLOWERMONS_DIRECTORY = os.path.join(DATA_DIRECTORY, 'mons')
 # required properties
 BOT_USERNAME = 'bot.username'
 CHANNEL = 'channel.name'
+CHANNEL_ID = 'channel.id'
 CLIENT_ID = 'client_id'
 CLIENT_SECRETS = 'client_secrets'
 IRC_CHAT_SERVER_PORT = 'server.port'
@@ -58,7 +59,7 @@ FLOWERMONS_SUBSCRIBERS_POKEBALL_LIMIT = 'flowermons.subs_pokeball_limit'
 MSG_USERNAME_REPLACE_STRING = '${username}'
 MSG_LAST_GAME_PLAYED_REPLACE_STRING = '${lastgameplayed}'
 MSG_TWITCH_PAGE_URL_REPLACE_STRING = '${usertwitchpage}'
-DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! For some ${lastgameplayed} action, check them out some time at https://www.twitch.tv/${username}'
+DEFAULT_USER_SHOUTOUT_MESSAGE_TEMPLATE = '@${username} is also a streamer! Check them out some time at https://www.twitch.tv/${username}'
 
 # FLOWERMONS
 FLOWERMONS_POKEDEX = set()
@@ -129,7 +130,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.sfx_directory = os.path.join(RESOURCES_DIR, 'sfx')
 
         self.death_count = 0
-        self.channel_id = self.get_channel_id(properties[CHANNEL])
+        self.channel_id = properties[CHANNEL_ID]
         self.trusted_users_list = properties[CHANNEL_TRUSTED_USERS_LIST]
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
         self.queue_names_list = properties.get(QUEUE_NAMES_LIST, [])
@@ -164,8 +165,7 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
 
         server = properties[IRC_CHAT_SERVER]
-        #port = int(properties[IRC_CHAT_SERVER_PORT])
-        port = 6667
+        port = int(properties[IRC_CHAT_SERVER_PORT])
 
         # Create IRC bot connection
         print('Connecting to %s on port %s...' % (server, port), file = OUTPUT_FILE)
@@ -322,51 +322,48 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
 
     def user_is_sub(self, e):
         ''' Returns whether user is a subscriber. '''
-        for d in e.tags:
-            if d['key'] in ['subscriber', 'founder']:
-                if d['value'][0] == '1':
-                    return True
-            elif d['key'] in ['badges', 'badge-info']:
-                if 'founder' in d['value']:
-                    return True
-        return False
-
-    def get_channel_id(self, twitch_channel):
-        ''' Returns the twitch channel id. '''
-        url = 'https://api.twitch.tv/kraken/users?login=' + twitch_channel
-        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        r = requests.get(url, headers=headers).json()
-        return r['users'][0]['_id']
-
-    def get_last_game_played(self, twitch_channel_id):
-        ''' Returns last game played for given channel id. '''
-        url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
-        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        r = requests.get(url, headers=headers).json()
         try:
-            game = encode_ascii_string(r['game'])
+            for d in e.tags:
+                if d['key'] in ['subscriber', 'founder']:
+                    if d['value'][0] == '1':
+                        return True
+                elif d['key'] in ['badges', 'badge-info']:
+                    if 'founder' in d['value']:
+                        return True
         except:
-            game = 'None'
-        return game
-
-    def is_spawnpoint_team_member(self, twitch_channel_id):
-        ''' Returns which stream teams a channel belongs to. '''
-        url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id + '/teams'
-        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        r = requests.get(url, headers=headers).json()
-        if 'teams' in r:
-            for data in r['teams']:
-                if data.get('name', '').lower() == 'spawnpoint':
-                    return True
+            return False
         return False
 
+# TODO: update to use latest twitch api
 
-    def get_channel_title(self, e):
-        ''' Returns channel title. '''
-        url = 'https://api.twitch.tv/kraken/channels/' + self.channel_id
-        headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
-        r = requests.get(url, headers=headers).json()
-        return encode_ascii_string(r['status'])
+    # def get_channel_id(self, twitch_channel):
+    #     ''' Returns the twitch channel id. '''
+    #     url = 'https://api.twitch.tv/kraken/users?login=' + twitch_channel
+    #     headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+    #     r = requests.get(url, headers=headers).json()
+    #     return r['users'][0]['_id']
+
+    # def get_last_game_played(self, twitch_channel_id):
+    #     ''' Returns last game played for given channel id. '''
+    #     url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id
+    #     headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+    #     r = requests.get(url, headers=headers).json()
+    #     try:
+    #         game = encode_ascii_string(r['game'])
+    #     except:
+    #         game = 'None'
+    #     return game
+
+    # def is_spawnpoint_team_member(self, twitch_channel_id):
+    #     ''' Returns which stream teams a channel belongs to. '''
+    #     url = 'https://api.twitch.tv/kraken/channels/' + twitch_channel_id + '/teams'
+    #     headers = {'Client-ID': self.client_id, 'Accept': 'application/vnd.twitchtv.v5+json'}
+    #     r = requests.get(url, headers=headers).json()
+    #     if 'teams' in r:
+    #         for data in r['teams']:
+    #             if data.get('name', '').lower() == 'spawnpoint':
+    #                 return True
+    #     return False
 
     def current_death_count(self, c):
         ''' Returns current death count. '''
@@ -379,12 +376,14 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         ''' Determines whether user is valid for giving shout outs to or should be ignored. '''
         return (user not in self.ignored_users_list)
 
-    def format_streamer_shoutout_message(self, user, game):
+    def format_streamer_shoutout_message(self, user):
         message = CUSTOM_USER_SHOUTOUTS.get(user, self.user_shoutout_message_template)
         if MSG_USERNAME_REPLACE_STRING in message:
             message = message.replace(MSG_USERNAME_REPLACE_STRING, user)
-        if MSG_LAST_GAME_PLAYED_REPLACE_STRING in message:
-            message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
+
+        # TODO: update to use latest twitch api
+        # if MSG_LAST_GAME_PLAYED_REPLACE_STRING in message:
+        #     message = message.replace(MSG_LAST_GAME_PLAYED_REPLACE_STRING, game)
         return encode_ascii_string(message)
 
     def streamer_shoutout_message(self, user):
@@ -396,14 +395,29 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         if user == self.channel_display_name:
             c.privmsg(self.channel, 'Jebaited')
             return
-        cid = self.get_channel_id(user)
-        game = self.get_last_game_played(cid)
+        # TODO: update to use latest twitch api
+        # cid = self.get_channel_id(user)
+        # game = self.get_last_game_played(cid)
+        print('checking users checked...')
+        print(user)
         USERS_CHECKED.add(user)
-        if str(game) != "None":
-            message = self.format_streamer_shoutout_message(user, game)
-            if self.is_spawnpoint_team_member(cid):
-                message = 'Is that a Spawn Point team member I see?! xcornfPOG ' + message
-        c.privmsg(self.channel, message)
+        # TODO: update to use latest twitch api
+        # if str(game) != "None" or user in APPROVED_AUTO_SHOUTOUT_USERS:
+        if user in APPROVED_AUTO_SHOUTOUT_USERS:
+            print('user is in approved users list...')
+            message = self.format_streamer_shoutout_message(user)
+            print(message)
+            # TODO: update to use latest twitch api
+            # if self.is_spawnpoint_team_member(cid):
+            #     message = 'Is that a Spawn Point team member I see?! xcornfPOG ' + message
+            c.privmsg(self.channel, message)
+        else:
+            message = self.format_streamer_shoutout_message(user)
+            print(message)
+            # TODO: update to use latest twitch api
+            # if self.is_spawnpoint_team_member(cid):
+            #     message = 'Is that a Spawn Point team member I see?! xcornfPOG ' + message
+            c.privmsg(self.channel, message)
         if user in SFX_MAPPINGS.keys():
             sfx_filename = os.path.join(self.sfx_directory, SFX_MAPPINGS[user])
             playsound(sfx_filename)
@@ -730,11 +744,12 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         return
 
     def splat3_reveal_day_count(self):
-        reveal_date = datetime.strptime('2/17/2021', '%m/%d/%Y')
+        # reveal_date = datetime.strptime('2/17/2021', '%m/%d/%Y')
+        release_date = datetime.strptime('9/9/2022', '%m/%d/%Y')
         today = datetime.strptime(date.today().strftime('%m/%d/%Y'), '%m/%d/%Y')
-        days_since = today - reveal_date
+        days_togo = release_date - today
         c = self.connection
-        c.privmsg(self.channel, "It's been %s days since Nintendo revealed Splatoon 3 xcornfPOG" % days_since.days)
+        c.privmsg(self.channel, "xcornfETTI xcornfUN xcornfETTI ONLY %s days UNTIL SPLATOON 3 ARRIVES xcornfETTI xcornfUN xcornfETTI" % days_togo.days)
         return
 
     # ---------------------------------------------------------------------------------------------
@@ -744,23 +759,10 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         user_has_mod_privileges = False
         if self.user_is_mod(e) or cmd_issuer in self.trusted_users_list:
             user_has_mod_privileges = True
-        user_is_sub = self.user_is_sub(e)
+        user_is_sub = True #self.user_is_sub(e)
 
-        #### TODO: Pending fix for how new commands or existing commands are added or updated
-        # if cmd in ['addcmd', 'editcmd', 'addalias'] and user_has_mod_privileges:
-        #     new_cmd = cmd_args[0]
-        #     new_cmd_response = ' '.join(cmd_args[1:])
-        #     if cmd == 'addcmd':
-        #         self.add_new_command(new_cmd, new_cmd_response)
-        #     elif cmd == 'editcmd':
-        #         self.edit_existing_command(new_cmd, new_cmd_response)
-        #     elif cmd == 'addalias':
-        #         self.add_new_alias_keyword(new_cmd, new_cmd_response)
         if cmd == 'splat3':
             self.splat3_reveal_day_count()
-        elif cmd == "title":
-            title = self.get_channel_title(self.channel_id)
-            c.privmsg(self.channel, self.channel_display_name + ' channel title is currently ' + title)
         elif cmd == 'death':
             self.current_death_count(c)
         elif cmd == 'print' and len(self.queue_names_list) > 0:
