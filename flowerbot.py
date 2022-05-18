@@ -275,11 +275,18 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         except UnicodeEncodeError:
             print("[UnicodeEncodeError], Error parsing command.", file = ERROR_FILE)
             return
+
+        # check message for any keywords used
+        keyword_matches = [v for v in parsed_args if v in AUTOBOT_RESPONSES.keys()]
+        if len(keyword_matches) > 0:
+            self.send_auto_bot_response(random.choice(keyword_matches))
+
         ##TODO: REPLACE WITH REGEX
         if not parsed_args[0].startswith('!'):
             return
         cmd = parsed_args[0].replace('!','')
         cmd_args = []
+
         if len(parsed_args) > 1:
             cmd_args = list(map(lambda x: x.replace('@',''), parsed_args[1:]))
         print('Received command: %s with args: %s' % (cmd, ', '.join(cmd_args)), file = OUTPUT_FILE)
