@@ -21,10 +21,6 @@ APPROVED_AUTO_SHOUTOUT_USERS = {}
 CUSTOM_USER_SHOUTOUTS = {}
 USERS_CHECKED = set()
 
-# QUEUE
-USER_QUEUE = {}
-QUEUE_SCORE = {}
-
 # SYSTEM GLOBALS
 CURRENT_DIR = os.getcwd()
 RESOURCES_DIR = os.path.join(CURRENT_DIR, 'resources')
@@ -44,7 +40,6 @@ AUTO_SHOUTOUT_USERS_FILE = 'auto_shoutout_users_file'
 CUSTOM_SHOUTOUTS_FILE = 'custom_shoutouts_file'
 CUSTOM_USER_SHOUTOUT_MESSAGE_TEMPLATE = 'custom.user_shoutout_message'
 IGNORED_USERS_LIST = 'ignored_users_list'
-QUEUE_NAMES_LIST = 'queue_names_list'
 AUTOBOT_RESPONSES_FILE = 'auto_bot_responses_file'
 SFX_DIRECTORY = 'sfx.directory'
 
@@ -69,9 +64,8 @@ FLOWERMONS_SUB_SHINY_DENOM = 256
 
 # valid commands
 VALID_COMMANDS = ['game', 'title', 'so', 'death', 'print',
-    'queueinit', 'score', 'streameraddnew', 'deathadd', 'deathreset',
-    'deathinit', 'uptime', 'shoutout',
-    'flowerdex', 'catch', 'flowermons', 'addballs']
+    'score', 'streameraddnew', 'deathadd', 'deathreset',
+    'deathinit', 'shoutout', 'flowerdex', 'catch', 'flowermons', 'addballs']
 
 ## TODO: move mappings to data file :)
 SFX_MAPPINGS = {
@@ -133,7 +127,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         self.channel_id = properties[CHANNEL_ID]
         self.trusted_users_list = properties[CHANNEL_TRUSTED_USERS_LIST]
         self.ignored_users_list = properties.get(IGNORED_USERS_LIST, [])
-        self.queue_names_list = properties.get(QUEUE_NAMES_LIST, [])
         self.flowermons_enabled = (properties.get(FLOWERMONS_ENABLED, 'false') == 'true')
         self.flowermons_filename = os.path.join(FLOWERMONS_DIRECTORY, properties.get(FLOWERMONS_FILENAME, ''))
         self.flowermons_user_data_filename = os.path.join(FLOWERMONS_DIRECTORY, properties.get(FLOWERMONS_USER_DATA_FILENAME, '')) 
@@ -398,22 +391,17 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
         # TODO: update to use latest twitch api
         # cid = self.get_channel_id(user)
         # game = self.get_last_game_played(cid)
-        print('checking users checked...')
-        print(user)
         USERS_CHECKED.add(user)
         # TODO: update to use latest twitch api
         # if str(game) != "None" or user in APPROVED_AUTO_SHOUTOUT_USERS:
         if user in APPROVED_AUTO_SHOUTOUT_USERS:
-            print('user is in approved users list...')
             message = self.format_streamer_shoutout_message(user)
-            print(message)
             # TODO: update to use latest twitch api
             # if self.is_spawnpoint_team_member(cid):
             #     message = 'Is that a Spawn Point team member I see?! xcornfPOG ' + message
             c.privmsg(self.channel, message)
         else:
             message = self.format_streamer_shoutout_message(user)
-            print(message)
             # TODO: update to use latest twitch api
             # if self.is_spawnpoint_team_member(cid):
             #     message = 'Is that a Spawn Point team member I see?! xcornfPOG ' + message
@@ -442,135 +430,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             if len(APPROVED_AUTO_SHOUTOUT_USERS.keys()) > 0:
                 with open(self.auto_shoutout_users_file, 'w') as streamer_file:
                     streamer_file.write('\n'.join(APPROVED_AUTO_SHOUTOUT_USERS.keys()))
-
-    # ---------------------------------------------------------------------------------------------
-    # CUSTOM USER QUEUE FUNCTIONS
-    def add_user_to_queue(self, user, input_queue_name):
-        ''' Adds user to specified queue. '''
-        c = self.connection
-        # check if user already exists in one of the available queues
-        (user_queue, user_position) = self.get_user_queue_and_position(user)
-
-        # if user in another queue then user must leave it to enter a different queue
-        if user_queue:
-            if user_queue != input_queue_name:
-                message = "Hey %s, you are already in the queue for %s! You cannot join a different queue without leaving the one you are already in first. Leave the queue by entering '!leave'" % (user, user_queue)
-            else:
-                message = "Hey %s, you are already in the %s queue! Your position is #%s" % (user, user_queue, user_position)
-        else:
-            queue_list = USER_QUEUE.get(input_queue_name, [])
-            queue_list.append(user)
-            USER_QUEUE[input_queue_name] = queue_list
-            message = 'Hey %s, you have entered the queue for %s! Your position is #%s' % (user, input_queue_name, (queue_list.index(user) + 1))
-        c.privmsg(self.channel, message)
-        return
-
-    def get_user_queue_and_position(self, user):
-        ''' Returns which queue the user is in and their position in the queue. '''
-        user_queue = ''
-        user_position = -1
-        for queue in self.queue_names_list:
-            queue_list = USER_QUEUE.get(queue, [])
-            if user in queue_list:
-                user_queue = queue
-                user_position = queue_list.index(user) + 1
-                break
-        return (user_queue, user_position)
-
-    def kick_user_from_queue(self, user):
-        ''' Kicks user from specified queue. '''
-        c = self.connection
-        (user_queue_name, user_position) = self.get_user_queue_and_position(user)
-        if user_queue_name:
-            queue_list = USER_QUEUE.get(user_queue_name, [])
-            queue_list.remove(user)
-            USER_QUEUE[user_queue_name] = queue_list
-            message = '%s has left the queue for %s' % (user, user_queue_name)
-            c.privmsg(self.channel, message)
-        return
-
-    def get_next_user_in_queue(self, input_queue_name):
-        ''' Returns next user in specified queue. '''
-        if len(self.queue_names_list) == 0:
-            return
-        c = self.connection
-        queue_list = USER_QUEUE.get(input_queue_name, [])
-        if queue_list:
-            next_user = queue_list.pop(0)
-            message = 'Hey %s, you are up next for queue %s' % (next_user, input_queue_name)
-            if len(queue_list) > 0:
-                message += ';  %s is next in queue!' % (queue_list[0])
-            USER_QUEUE[input_queue_name] = queue_list
-        else:
-            message = 'The queue for %s is empty ResidentSleeper' % (input_queue_name)
-        c.privmsg(self.channel, message)
-        return
-
-    def print_current_score(self):
-        ''' Prints current score. '''
-        if len(self.queue_names_list) == 0:
-            return
-        c = self.connection
-        score_board = []
-        for q in self.queue_names_list:
-            score_board.append('%s = %s win(s)' % (q, QUEUE_SCORE.get(q, 0)))
-        message = 'Current scores: ' + ',  '.join(score_board)
-        c.privmsg(self.channel, message)
-        return
-
-    def print_all_queues(self):
-        '''  Prints all the queues. '''
-        if len(self.queue_names_list) == 0:
-            return
-        c = self.connection
-        current_queues = []
-        for q in self.queue_names_list:
-            if len(USER_QUEUE.get(q, [])) > 0:
-                m = "Current queue for %s: %s" % (q, ', '.join(USER_QUEUE[q]))
-            else:
-                m = "Current queue for %s is empty BibleThump" % (q)
-            current_queues.append(m)
-        c.privmsg(self.channel, ';   '.join(current_queues))
-        return
-
-    def format_available_queues_message(self):
-        ''' Prints the available queues to join. '''
-        available_queues_message = "There aren't any queues available to join at this time."
-        if len(self.queue_names_list) > 0:
-            available_queues_message = "Available queue(s) to join: %s - use ![queue name] to join" % (', '.join(self.queue_names_list))
-        return available_queues_message
-
-    def print_available_queues(self):
-        ''' Shares which queues are available to join. '''
-        c = self.connection
-        c.privmsg(self.channel, self.format_available_queues_message())
-        return
-
-    def print_user_position_in_queue(self, user):
-        ''' Prints user's current position in queue. '''
-        c = self.connection
-        (user_queue, user_position) = self.get_user_queue_and_position(user)
-        if user_queue:
-            message = "Hey %s, you are in queue %s and your position is #%s" % (user, user_queue, user_position)
-        else:
-            message = "Hey %s, you are not in any queues yet. Use '!queues' to see which queues are available to join." % (user)
-        c.privmsg(self.channel, message)
-        return
-
-    def init_new_queue_list(self, queue_names_list):
-        ''' Sets the available queues to join to the specified list. '''
-        c = self.connection
-        # confirm that the queue names are not already in the valid commands set so as to not confuse any bots
-        invalid_queue_names = [q for q in queue_names_list if q in VALID_COMMANDS]
-        if len(invalid_queue_names) > 0:
-            message = "Cannot set queue names to names of commands which already exist! Invalid queue names: %s" % (', '.join(invalid_queue_names))
-        else:
-            self.queue_names_list = queue_names_list[:]
-            USER_QUEUE.clear()
-            QUEUE_SCORE.clear()
-            message = self.format_available_queues_message()
-        c.privmsg(self.channel, message)
-        return
 
     # ---------------------------------------------------------------------------------------------
     # FLOWERMONS
@@ -765,24 +624,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
             self.splat3_reveal_day_count()
         elif cmd == 'death':
             self.current_death_count(c)
-        elif cmd == 'print' and len(self.queue_names_list) > 0:
-            self.print_all_queues()
-        elif cmd == 'score' and len(self.queue_names_list) > 0:
-            self.print_current_score()
-        elif len(self.queue_names_list) > 0 and (cmd in self.queue_names_list):
-            if not cmd_args:
-                self.add_user_to_queue(cmd_issuer, cmd)
-            elif 'leave' in cmd_args or cmd == 'leave':
-                self.kick_user_from_queue(cmd_issuer)
-            elif 'next' in cmd_args and cmd_issuer == self.channel_display_name:
-                self.get_next_user_in_queue(cmd)
-            elif 'win' in cmd_args and cmd_issuer == self.channel_display_name:
-                QUEUE_SCORE[cmd] = QUEUE_SCORE.get(cmd, 0) + 1
-                self.print_current_score()
-            elif cmd in ['join', 'list', 'queues']:
-                self.print_available_queues()
-            elif cmd in ['position', 'pos']:
-                self.print_user_position_in_queue(cmd_issuer)
         elif cmd == 'flowermons':
             c.privmsg(self.channel, 'The Flowermons help doc can be found here: https://github.com/xcornflowerx/flowerbot/blob/master/docs/Flowermons.md')
             c.privmsg(self.channel, 'Flowermons commands list: !catch !flowerdex !leaders')
@@ -802,9 +643,6 @@ class TwitchBot(irc.bot.SingleServerIRCBot):
                     self.print_flowerdex_leaders_message()
                 elif cmd == 'catch':
                     self.catch_flowermon(cmd_issuer, user_is_sub)
-        elif cmd == 'queueinit':
-            if cmd_issuer == self.channel_display_name and len(cmd_args) > 0:
-                self.init_new_queue_list(cmd_args)
         elif cmd == 'deathadd' and user_has_mod_privileges:
             self.death_count += 1
             c.privmsg(self.channel, "%s's current death count is now %s BibleThump" % (self.channel_display_name, self.death_count))

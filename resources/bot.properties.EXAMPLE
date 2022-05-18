@@ -1,16 +1,10 @@
 # channel properties
 bot.username=
 channel.name=
+channel.id=
 client_id=
 client_secrets=
 channel.mod_permissions_list=
-
-# db properties
-db.host=
-db.db_name=
-db.user=
-db.password=
-db.port=
 
 # twitch irc server properties
 server.url=irc.chat.twitch.tv
@@ -21,7 +15,6 @@ auto_shoutout_users_file=
 custom_shoutouts_file=
 ignored_users_list=nightbot,streamelements
 restricted_users_list=
-queue_names_list=
 auto_bot_responses_file=
 
 # flowermons file
