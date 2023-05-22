@@ -4,5 +4,5 @@ irc==16.4
 oauth2client==4.1.2
 playsound==1.2.2
 python-twitch-client==0.6.0
-requests==2.19.1
+requests==2.31.0
 urllib3==1.23
